@@ -1,0 +1,643 @@
+bt_navigator:
+  ros__parameters:
+    use_sim_time: False
+    global_frame: map
+    robot_base_frame: "base_link"
+    odom_topic: /aft_mapped_to_init
+    bt_loop_duration: 20 # ms
+    # 行为树超时时间，秒
+    default_server_timeout: 20
+    # 毫秒
+    wait_for_service_timeout: 2000
+    # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
+    # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
+    # nav2_bt_navigator/navigate_through_poses_w_replanning_and_recovery.xml
+    # They can be set here or via a RewrittenYaml remap from a parent launch file to Nav2.
+    default_nav_through_poses_bt_xml: src/navigation/navi2_bringup/behavior_tree/navigate_through_pose_w_replanning_and_recovery.xml
+    default_nav_to_pose_bt_xml: src/navigation/navi2_bringup/behavior_tree/navigate_to_pose_w_replanning_and_recovery.xml
+    plugin_lib_names:
+      - nav2_compute_path_to_pose_action_bt_node
+      - nav2_compute_path_through_poses_action_bt_node
+      - nav2_smooth_path_action_bt_node
+      - nav2_follow_path_action_bt_node
+      - nav2_spin_action_bt_node
+      - nav2_wait_action_bt_node
+      - nav2_assisted_teleop_action_bt_node
+      - nav2_back_up_action_bt_node
+      - nav2_drive_on_heading_bt_node
+      - nav2_clear_costmap_service_bt_node
+      - nav2_is_stuck_condition_bt_node
+      - nav2_goal_reached_condition_bt_node
+      - nav2_goal_updated_condition_bt_node
+      - nav2_globally_updated_goal_condition_bt_node
+      - nav2_is_path_valid_condition_bt_node
+      - nav2_initial_pose_received_condition_bt_node
+      - nav2_reinitialize_global_localization_service_bt_node
+      - nav2_rate_controller_bt_node
+      - nav2_distance_controller_bt_node
+      - nav2_speed_controller_bt_node
+      - nav2_truncate_path_action_bt_node
+      - nav2_truncate_path_local_action_bt_node
+      - nav2_goal_updater_node_bt_node
+      - nav2_recovery_node_bt_node
+      - nav2_pipeline_sequence_bt_node
+      - nav2_round_robin_node_bt_node
+      - nav2_transform_available_condition_bt_node
+      - nav2_time_expired_condition_bt_node
+      - nav2_path_expiring_timer_condition
+      - nav2_distance_traveled_condition_bt_node
+      - nav2_single_trigger_bt_node
+      - nav2_goal_updated_controller_bt_node
+      - nav2_is_battery_low_condition_bt_node
+      - nav2_navigate_through_poses_action_bt_node
+      - nav2_navigate_to_pose_action_bt_node
+      - nav2_remove_passed_goals_action_bt_node
+      - nav2_planner_selector_bt_node
+      - nav2_controller_selector_bt_node
+      - nav2_goal_checker_selector_bt_node
+      - nav2_controller_cancel_bt_node
+      - nav2_path_longer_on_approach_bt_node
+      - nav2_wait_cancel_bt_node
+      - nav2_spin_cancel_bt_node
+      - nav2_back_up_cancel_bt_node
+      - nav2_assisted_teleop_cancel_bt_node
+      - nav2_drive_on_heading_cancel_bt_node
+      - nav2_is_battery_charging_condition_bt_node
+
+bt_navigator_navigate_through_poses_rclcpp_node:
+  ros__parameters:
+    use_sim_time: False
+
+bt_navigator_navigate_to_pose_rclcpp_node:
+  ros__parameters:
+    use_sim_time: False
+
+controller_server:
+  ros__parameters:
+    robot_base_frame: "base_link"
+    use_sim_time: False
+    controller_frequency: 100.0
+    min_x_velocity_threshold: 0.01
+    min_y_velocity_threshold: 0.01
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.1
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["general_goal_checker"] 
+    controller_plugins: ["FollowPath"]
+
+    # Progress checker parameters
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.1
+      movement_time_allowance: 1000.0
+    general_goal_checker:
+      stateful: True
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.3
+      yaw_goal_tolerance: 6.28
+
+    FollowPath:
+      plugin: "minco_controller::MincoMpcController"
+      # MPC sampling period (s) and lookahead time (s)
+      dt: 0.05
+      lookahead_time : 0.5
+      use_small_gyro_mode: false
+      deadzone_speed_threshold: 0.1
+      control_delay_compensation: 0.05 
+
+      # Cost weights: Q for state error [x, y, yaw], R for control error [vx, vy, omega]
+      Q: [3.0, 3.0, 2.0]
+      R: [1.5, 1.5, 1.0]
+
+      # Velocity bounds
+      vx_min: -3.0
+      vx_max: 3.0
+      vy_min: -3.0
+      vy_max: 3.0
+      fixed_wz: 4.18 # rad/s, used if use_small_gyro_mode is true
+      omega_min: -5.0 
+      omega_max: 5.0
+
+      # Optional acceleration constraints
+      use_acc_constraints: true
+      ax_min: -2.0
+      ax_max: 2.0
+      ay_min: -2.0
+      ay_max: 2.0
+      alpha_min: -5.0
+      alpha_max: 5.0
+
+      # Lidar extrinsic parameters
+      lidar_offset_x: 0.0
+      lidar_offset_y: -0.20
+      lidar_roll_offset: 0.1745
+
+      # Frame settings
+      odom_frame: "camera_init"
+      map_frame: "map"
+
+      performance:
+        enable: true
+        print_enable: true
+        detailed_csv_enable: false
+        odom_sub_debug_enable: false
+        mpc_csv_path: /tmp/mpc_perf_detailed.csv
+        print_period_sec: 1.0
+        csv_flush_every_n: 30
+        run_id: ""
+        scenario: ""
+        variant: ""
+
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 10.0
+      publish_frequency: 10.0
+      global_frame: camera_init
+      robot_base_frame: base_link
+      use_sim_time: False
+      rolling_window: true
+      width: 5
+      height: 5
+      resolution: 0.05
+      # robot_radius: 0.22
+      robot_radius: 0.2
+      plugins: ["static_layer", "stvl_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 6.0
+        inflation_radius: 0.25
+      stvl_layer:
+        plugin: "spatio_temporal_voxel_layer/SpatioTemporalVoxelLayer"
+        enabled: true
+        voxel_decay: 0.6
+        decay_model: 0
+        voxel_size: 0.05
+        track_unknown_space: true
+        unknown_threshold: 5
+        mark_threshold: 0
+        update_footprint_enabled: true
+        combination_method: 1
+        origin_z: 0.0
+        publish_voxel_map: true
+        transform_tolerance: 0.2
+        mapping_mode: false
+        map_save_duration: 60.0
+        observation_sources: mid360
+        mid360:
+          data_type: PointCloud2
+          topic: /cloud_registered_filtered
+          marking: true
+          clearing: true
+          obstacle_range: 8.0
+          min_obstacle_height: -0.1
+          max_obstacle_height: 1.0
+          expected_update_rate: 0.0
+          observation_persistence: 0.0
+          inf_is_valid: false
+          filter: "voxel"
+          voxel_min_points: 0
+          clear_after_reading: true
+
+          # 视锥模型参数，用于根据传感器的视锥体来更新STVL层的代价地图
+          max_z: 10.0 # 清除距离
+          min_z: 0.1
+          vertical_fov_angle: 1.03   # default 0.7, radians. For 3D lidars it's the symmetric FOV about the planar axis.
+          vertical_fov_offset: 0.3927  # default 0, radians. 3D Lidar only. Offset from planar axis. f.e. MID360 has a vFOV of -7deg to 52deg => offset +22.5deg (0.3927 rad)
+          vertical_fov_padding: 0.05   # 3D Lidar only. Default 0, in meters 
+          horizontal_fov_angle: 6.29   # 3D lidar scanners like the VLP16 have 360 deg horizontal FOV.
+          decay_acceleration: 15.0
+          model_type: 1
+      always_send_full_costmap: True
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 10.0
+      publish_frequency: 10.0
+      global_frame: map
+      robot_base_frame: base_link
+      use_sim_time: False
+      # robot_radius: 0.22
+      robot_radius: 0.20
+      resolution: 0.05
+      track_unknown_space: true
+      plugins: ["static_layer", "stvl_layer", "inflation_layer"]
+      # plugins: ["static_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 6.0
+        inflation_radius: 0.80
+      stvl_layer:
+        plugin: "spatio_temporal_voxel_layer/SpatioTemporalVoxelLayer"
+        enabled: true
+        voxel_decay: 1.5
+        decay_model: 0
+        voxel_size: 0.05
+        track_unknown_space: true
+        unknown_threshold: 5
+        mark_threshold: 0
+        update_footprint_enabled: true
+        combination_method: 1
+        origin_z: 0.0
+        publish_voxel_map: false
+        transform_tolerance: 0.2
+        mapping_mode: false
+        map_save_duration: 60.0
+        observation_sources: mid360
+        mid360:
+          data_type: PointCloud2
+          topic: /cloud_registered
+          sensor_frame: body
+          marking: true
+          clearing: true
+          obstacle_range: 8.0
+          min_obstacle_height: 0.1
+          max_obstacle_height: 0.8
+          expected_update_rate: 0.0
+          observation_persistence: 0.0
+          inf_is_valid: false
+          filter: "voxel"
+          voxel_min_points: 0
+          clear_after_reading: true
+
+          # 视锥模型参数，用于根据传感器的视锥体来更新STVL层的代价地图
+          max_z: 10.0 # 清除距离
+          min_z: 0.1
+          vertical_fov_angle: 1.03   # default 0.7, radians. For 3D lidars it's the symmetric FOV about the planar axis.
+          vertical_fov_offset: 0.3927  # default 0, radians. 3D Lidar only. Offset from planar axis. f.e. MID360 has a vFOV of -7deg to 52deg => offset +22.5deg (0.3927 rad)
+          vertical_fov_padding: 0.05   # 3D Lidar only. Default 0, in meters 
+          horizontal_fov_angle: 6.29   # 3D lidar scanners like the VLP16 have 360 deg horizontal FOV.
+          decay_acceleration: 15.0
+          model_type: 1
+      always_send_full_costmap: True
+
+map_server:
+  ros__parameters:
+    use_sim_time: False
+    # Overridden in launch by the "map" launch configuration or provided default value.
+    # To use in yaml, remove the default "map" value in the tb3_simulation_launch.py file & provide full path to map below.
+    yaml_filename: ""
+
+map_saver:
+  ros__parameters:
+    use_sim_time: False
+    save_map_timeout: 5.0
+    free_thresh_default: 0.25
+    occupied_thresh_default: 0.65
+    map_subscribe_transient_local: True
+
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 20.0
+    use_sim_time: False
+    planner_plugins: ["MincoPlanner"]
+
+    MincoPlanner:
+      plugin: "minco_planner/MincoPlanner"
+      planner_mode: PRIORMAP
+      # planner_mode: EXPLORATION
+      frames:
+        map_frame: map
+        rog_frame: camera_init
+      priormap:
+        use_nav2_global_search: true
+        clip_seed_by_rog_boundary: true
+        rog_boundary_margin: 0.2
+        rog_boundary_sample_step: 0.1
+      exploration:
+        boundary_margin: 0.2
+        boundary_sample_step: 0.1
+        unknown_as_occupied: true
+        prefer_goal_direction: true
+      tolerance: 0.3  
+      use_smac: true
+      allow_unknown: false
+      odom_topic: /aft_mapped_to_init
+      lidar_offset_x: 0.0
+      lidar_offset_y: -0.20
+      performance:
+        enable: false
+        print_enable: false
+        detailed_csv_enable: false
+        odom_sub_debug_enable: false
+        minco_csv_path: /tmp/minco_perf_detailed.csv
+        print_period_sec: 1.0
+        csv_flush_every_n: 30
+        run_id: ""
+        scenario: ""
+        variant: ""
+      rog_map:
+        frame_id: camera_init
+        resolution: 0.05
+        # [基础地图][m/cell] 三维膨胀地图分辨率；通常与 resolution 保持一致，过细增加膨胀查询计算量，过粗会让碰撞边界变粗糙。
+        inflation_resolution: 0.05
+        map_size: [10.0, 10.0, 1.5]
+        fix_map_origin: [0.0, 0.0, 0.0]
+
+        map_sliding:
+          enable: true
+          # [map_sliding][m] 触发地图滑动的位移阈值；过小会频繁滑动并带来计算抖动，过大可能让机器人靠近局部地图边缘。
+          threshold: 0.2
+          center_offset_enable: true
+          center_offset: [0.0, 0.20, 0.0]
+
+        ros_callback:
+          enable: true
+          cloud_topic: /cloud_registered_full
+          odom_topic: /aft_mapped_to_init
+          odom_timeout: 2.0
+          update_period_ms: 20
+
+        # 入图前点云区域滤除；关闭时不创建过滤器，保持原始 ROGMap 数据链路。
+        cloud_filter:
+          enable: false
+          z_offset: -1.0
+          position_frame: map
+          filter_mode: transform_center   # transform_cloud | transform_center
+          remove_inside: true             # true: 删除框内点，false: 仅保留框内点
+          log_stats: false
+          stats_log_period_ms: 1000        # 0: 每帧输出
+          publish_visualization: true
+          visualization_topic: /cloud_registered_crop_filter/markers
+          visualization_period_ms: 200     # 0: 每帧发布
+          z_plane_size: 10.0
+          z_plane_thickness: 0.03
+          box_padding: 0.1
+          # positions.* 未配置或长度不一致时使用单框参数。
+          position:
+            x: 0.0
+            y: 0.0
+            z: 0.0
+          box_size:
+            x: 12.0
+            y: 6.0
+            z: 3.5
+          positions:
+            x: [15.6, 19.3, 13.4, 9.9]
+            y: [1.55, 12.9, 13.45, 2.1]
+            z: [0.2, 0.4, 0.2, 0.4]
+          box_sizes:
+            x: [0.8, 0.7, 0.8, 0.7]
+            y: [0.6, 0.4, 0.6, 0.4]
+            z: [0.1, 0.1, 0.1, 0.1]
+
+        raycasting:
+          enable: true
+          # [raycasting][帧] 每批处理点云帧数；调大可攒批减少调度开销，但会增加地图更新延迟。
+          batch_update_size: 1
+          # [raycasting][m,m] 射线有效距离 [min,max]；min 过大会忽略近处点，max 过大会增加计算量并可能引入远处噪声。
+          ray_range: [0.03, 10.0]
+          # [raycasting][m,m,m] 每次局部更新盒尺寸；调大覆盖更多点但 raycasting 和 dirty column 数量上升。
+          local_update_box: [10.0, 10.0, 2.5]
+          # [raycasting][概率] unknown 判断阈值相关参数；影响 UNKNOWN/FREE/OCCUPIED 判定，进而影响 projection layer。
+          unk_thresh: 0.70
+          p_hit: 0.9
+          p_miss: 0.45
+          p_min: 0.12
+          p_max: 0.97
+          p_occ: 0.85
+          p_free: 0.499
+          # [raycasting/performance][bool] raycast 并行开关；会被 performance.parallel_raycast_enable 后加载覆盖，影响 CPU 占用和更新延迟。
+          parallel_enable: false
+          # [raycasting/performance][线程] raycast 线程数；不宜超过可用 CPU 核数，过大可能因竞争导致抖动。
+          num_threads: 4
+
+        decay:
+          enable: true
+          # [decay][s] 最后一次 hit 后保持 occupied 的最小时间；过短障碍闪烁，过长动态障碍残留。
+          keep_time: 0.5
+          # [decay][s] 最后一次 hit 后强制衰减到 free 的最大时间；必须大于 keep_time。
+          clear_time: 1.2
+          # [decay][bool] 只维护活跃 cell 衰减列表；开启通常降低计算量，若列表维护异常会影响动态清除完整性。
+          active_list_enable: false
+
+        projection:
+          enable: true
+
+          # 标准 Nav2 YAML/PGM 静态先验；启用后只增加二维硬障碍，不清除在线障碍。
+          prior_map:
+            enable: true
+            # yaml_path: "src/navigation/navi2_bringup/maps/2026/rmuc2026_prior.yaml"
+            yaml_path: "src/navigation/navi2_bringup/maps/2026/rmuc2026_prior11.yaml"
+            # 留空时使用 YAML 的 image 字段，并相对 YAML 所在目录解析。
+            pgm_path: ""
+            frame_id: map
+
+          # [absolute Z coordinate, m]
+          # ROGMap frame 中参与单柱扫描的绝对 Z 下界。
+          # 这是坐标值，不是地面相对高度，也不是高度差。
+          scan_z_min_abs: -0.20
+
+          # [absolute Z coordinate, m]
+          # ROGMap frame 中参与单柱扫描的绝对 Z 上界。
+          # 这是坐标值，不是障碍高度，也不是高度差。
+          scan_z_max_abs: 1.5
+
+          # UNKNOWN 是否作为 ESDF 障碍。
+          unknown_as_occupied: false
+
+          # 每个 XY 柱中 KNOWN_FREE + OCCUPIED 的最小观测体素数。
+          min_observed_voxels: 2
+
+          # [vertical height difference, m]
+          # 同一 XY 柱中最高与最低占据体素的垂直高度差 H。
+          # 不超过该值时，分类为地面或坡面薄表面。
+          # 这是差值，不是 ROGMap frame 中的绝对 Z 坐标。
+          surface_height_delta_max: 0.25
+
+          # [vertical height difference, m]
+          # 判定竖直墙所需的最小单柱垂直高度差 H。
+          # 这是差值，不是绝对 Z 坐标。
+          wall_height_delta_min: 0.50
+
+          # [dimensionless ratio, 0~1]
+          # H 区间内的垂直占据率达到该值时，视为连续竖直墙。
+          wall_occupancy_ratio_min: 0.80
+
+          # [vertical height difference, m]
+          # 可通行隧道所需的最小上下表面高度差。
+          # 应包含机器人实际高度和安全余量。
+          # 这是差值，不是绝对 Z 坐标。
+          tunnel_height_delta_min: 0.26
+
+          # [vertical height difference, m]
+          # 当前 RM 场景中允许识别为目标隧道的最大上下表面高度差。
+          # 这是差值，不是绝对 Z 坐标。
+          tunnel_height_delta_max: 0.6
+
+          # [dimensionless ratio, 0~1]
+          # 隧道上下表面之间的最大垂直占据率。
+          tunnel_occupancy_ratio_max: 0.6
+
+          # PASSABLE 在 value layer 中的代价值。
+          passable_cost: 50
+
+          # PASSABLE 是否在 value layer 中写为 FREE。
+          # PASSABLE 的 ESDF mask 始终为 1。
+          passable_as_free: true
+
+          hysteresis_enable: false
+          hysteresis_count: 2
+          # Projection 二维障碍退出原始 OCCUPIED 后的保持时间，单位为秒。
+          obstacle_hold_time: 1.5
+
+          mask_filter_en: true
+          fill_occ_min: 8
+          denoise_occ_max: 0
+        field:
+          enable: true
+          inflation_radius: 0.0
+          # [field][m] ESDF 正向最大截断距离；调大提供更远梯度但代价有限，过小会让远离障碍区域梯度变少。
+          max_distance: 6.0
+          # [field][m] ESDF 负向最小截断距离；控制障碍内部负距离下限，影响优化代价范围。
+          min_distance: -3.0
+          clamp_distance: true
+          # [field][枚举] 插值方式 bilinear/quadratic；quadratic 梯度更平滑，边界邻域不足时会回退到 bilinear。
+          interpolation: quadratic
+          update_rate: 20.0
+
+        performance:
+          enable: false
+          detailed_csv_enable: false
+          summary_csv_enable: false
+          detailed_csv_path: /tmp/rog_map_perf_detailed.csv
+          summary_csv_path: /tmp/rog_map_perf_summary.csv
+          run_id: ""
+          # [performance][string] 实验场景名。
+          scenario: ""
+          # [performance][string] 实验变体名。
+          variant: ""
+          # [performance][行] CSV flush 间隔；避免每行强制 flush 变成新瓶颈，节点退出时仍会关闭文件。
+          csv_flush_every_n: 30
+          print_enable: true
+          # [performance][Hz] 性能摘要和 summary CSV 频率。
+          summary_rate: 1.0
+          # [performance][bool] 是否启用 dirty column 增量刷新；开启可减少 projection/field 全量刷新计算量。
+          dirty_column_enable: true
+          # [performance][比例] dirty column 超过地图总列数比例时转全量刷新；调低更常全量，调高更依赖增量更新。
+          dirty_full_ratio: 0.30
+          # [performance/raycasting][bool] 并行 raycast 开关；代码后加载该值，会覆盖 raycasting.parallel_enable。
+          parallel_raycast_enable: false
+          raycast_num_threads: 4
+
+        visualization:
+          # [visualization][bool] 总开关；false 时不创建可视化 timer，不发布任何可视化 topic。
+          enable: true
+          frame_id: camera_init
+          # [visualization][Hz] 可视化发布上限频率；实际每个 topic 仅在存在订阅者时构造并发布。
+          rate: 10.0
+          range: [10.0, 10.0, 1.5]
+      corridor:
+        robot_radius: 0.25
+        extra_margin: 0.05
+
+      smac_2d:
+        use_esdf_cost: true
+        esdf_weight: 1.0
+        esdf_decay: 0.8
+        esdf_max_cost: 0.5
+
+      minco_optimizer:
+        opt_freq: 20.0
+        traj_goal_tolerance: 0.3
+        enable_yaw_opt: true
+        safe_dist: 0.35
+        collision_dist: 0.2
+        lookahead_dist: 6.0  # 前视距离,用于minco部分优化
+        max_velocity: 3.0
+        max_acceleration: 2.0
+        max_yaw_dot: 5.0
+        turn_angle_deadzone: 0.1
+        turn_angle_saturation: 0.8
+        min_turn_vel: 0.7
+        decay_power: 1.6
+        time_allocation_iters: 15
+        smooth_eps: 0.01
+        integral_res: 16
+        opt_accuracy: 0.001
+        print_optimizer_log: false
+        penalty_weight_time: 100.0
+        penalty_weight_pos: 50000.0
+        penalty_weight_vel: 1500.0
+        penalty_weight_acc: 1500.0
+        penalty_weight_att: 100.0
+        penalty_weight_time_barrier: 50.0
+      recovery_server:
+        fail_threshold: 5
+        cooldown_sec: 1.0
+        recovery_window_sec: 3.0
+        escape_speed: 0.5
+
+smoother_server:
+  ros__parameters:
+    use_sim_time: False
+    smoother_plugins: ["simple_smoother"]
+    simple_smoother:
+      plugin: "nav2_smoother::SimpleSmoother"
+      tolerance: 1.0e-10
+      max_its: 1000
+      do_refinement: True
+
+behavior_server:
+  ros__parameters:
+    costmap_topic: local_costmap/costmap_raw
+    footprint_topic: local_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["wait"]
+    wait:
+      plugin: "nav2_behaviors/Wait"
+    # backup:
+    #   # plugin: "nav2_behaviors/BackUp"
+    #   plugin: "nav2_behaviors/BackUpTwzFree"
+    #   local_costmap_global_frame: camera_init
+    #   local_costmap_robot_base_frame: base_link
+    #   robot_radius: 0.3
+    #   cost_threshold: 0.0
+    #   visualization: true
+    global_frame: map
+    robot_base_frame: base_link
+    transform_tolerance: 0.1
+    use_sim_time: False
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.0
+    min_rotational_vel: 0.4
+    rotational_acc_lim: 3.2
+
+robot_state_publisher:
+  ros__parameters:
+    use_sim_time: False
+
+waypoint_follower:
+  ros__parameters:
+    use_sim_time: False
+    loop_rate: 20
+    stop_on_failure: false
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: True
+      waypoint_pause_duration: 0
+
+velocity_smoother:
+  ros__parameters:
+    enabled: False
+    use_sim_time: False
+    smoothing_frequency: 100.0
+    scale_velocities: False
+    feedback: "OPEN_LOOP"
+    max_velocity: [3.5, 3.5, 5.0]
+    min_velocity: [-3.5, -3.5, -5.0]
+    max_accel: [5.0, 5.0, 5.0]
+    max_decel: [-5.0, -5.0, -5.0]
+    odom_topic: "aft_mapped_to_init"
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0

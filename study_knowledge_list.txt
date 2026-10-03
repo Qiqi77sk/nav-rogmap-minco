@@ -1,0 +1,330 @@
+============================================================
+RoboMaster 哨兵导航代码学习知识点清单
+整理时间：2026-08-23
+适用对象：L2-L3（已掌握 ROS 2 / C++ / Linux 基础）
+项目路径：/home/tcr/navi_minco_bit
+============================================================
+
+说明：本清单只包含算法、概念与系统知识，不包含语法、工具使用、ROS 2 基础操作。
+
+============================================================
+一、感知（Perception）
+============================================================
+
+1.1 激光雷达与点云基础
+- Livox MID-360 固态雷达特性（非重复扫描、CustomMsg、内置 IMU）
+- 点云坐标系：雷达坐标系 / camera_init / body / base_link
+- 双雷达时间同步与外参标定
+- 点云融合：时间窗对齐 + 刚体变换融合
+
+1.2 LiDAR-Inertial Odometry（LIO）
+- IMU 运动模型与噪声模型
+- IMU 传播（propagation）与状态预测
+- 点云去畸变（deskew / motion compensation）
+- 前向-后向运动补偿
+- 迭代误差状态卡尔曼滤波（ESIKF / IEKF）
+- 卡尔曼增益、状态更新、误差状态
+- iVox 体素最近邻搜索
+- 点-平面 / 点-线残差
+- 状态：[p, v, R, ba, bg] 或对应形式
+
+1.3 Point-LIO 特有
+- batch 处理与时间窗
+- 盲区（blind）与盲区中心偏移
+- cloud_registered_full 完整点云生成链路
+- 稠密点云有序队列与异常点剔除
+- 高频 odom 与点云降频发布策略
+
+
+============================================================
+二、地图（Mapping）
+============================================================
+
+2.1 概率占据地图
+- Log-odds 概率更新
+- hit / miss / decay 模型
+- raycasting（光线投射）更新占据栅格
+- 滑动窗口地图（sliding window map）
+- 动态障碍遗忘：keep_time / clear_time
+
+2.2 投影与地形语义
+- 三维占据 → 二维投影
+- FREE / PASSABLE / OCCUPIED / UNKNOWN 分类
+- 高度差（height delta）阈值
+- 保守先验地图融合
+
+2.3 Signed ESDF
+- 欧氏距离场（Euclidean Distance Field）
+- Signed Distance Field：障碍外正、障碍内负
+- 截断距离（truncation distance）
+- ESDF 梯度与梯度恢复（gradient-based recovery）
+- 最近障碍查询
+
+
+============================================================
+三、规划（Planning）
+============================================================
+
+3.1 路径搜索
+- A* / Dijkstra
+- SMAC（State Lattice A* / Hybrid-A*）
+- Theta* / 视线检查（line-of-sight）
+- 代价地图（costmap）与势场
+- 启发函数设计
+
+3.2 轨迹表示
+- B-spline / 均匀 B 样条
+- 控制点（control points）与节点向量
+- MINCO：Minimum Control Effort 轨迹
+- 段时间（time allocation）
+- 多项式样条与连续性
+
+3.3 轨迹优化
+- 软约束优化：位置安全、速度、加速度、加加速度
+- ESDF 位置代价
+- 前端路径吸引项
+- 硬约束校验（discrete validation）
+- 热启动（warm start）
+- 时间优化（time optimization）
+
+3.4 规划状态机（FSM）
+- 初始化 / 待命 / 规划 / 跟踪 / 急停 / 恢复
+- replan 触发条件
+- 旧轨迹复用与覆盖策略
+- 安全距离与碰撞阈值
+
+
+============================================================
+四、控制（Control）
+============================================================
+
+4.1 模型预测控制（MPC）
+- MPC 基本框架：预测模型 + 代价函数 + 约束 + 滚动优化
+- 离散化模型
+- 预测时域与控制时域
+- 参考轨迹跟踪
+
+4.2 SE(2) 模型
+- 状态：[x, y, yaw]
+- 控制：[vx, vy, omega]
+- 世界坐标系速度 vs 车体坐标系速度
+- 全向底盘运动学
+
+4.3 QP 求解
+- 二次规划（Quadratic Programming）
+- qpOASES 求解器
+- 凝聚法（condensing）
+- 速度/加速度约束
+- 控制延迟补偿
+- 杆臂补偿（lidar offset compensation）
+
+
+============================================================
+五、决策与通信
+============================================================
+
+5.1 行为树（Behavior Tree）
+- Sequence / Fallback / Action / Condition
+- ReactiveSequence / ReactiveFallback
+- Blackboard 共享数据
+- 行为树 tick 机制
+- 子树与 XML 组织
+
+5.2 比赛策略
+- 战术模式（tactical_mode）
+- 目标点下发与 Nav2 action
+- 姿态、小陀螺、stance 切换
+- 裁判系统状态解析
+- 资源请求（买弹/买血/复活）
+
+5.3 通信协议
+- RoboMaster 裁判系统协议
+- 串口 / 网络通信
+- 位段打包/解包
+- 底盘控制指令协议
+
+
+============================================================
+六、系统与标定
+============================================================
+
+6.1 坐标系与 TF
+- map / camera_init / body / base_link / livox_frame
+- 静态 TF 与动态 TF
+- 外参矩阵 T 与 R
+- 坐标系重复发布问题
+
+6.2 标定
+- 双雷达外参标定
+- 雷达 IMU 外参
+- 雷达安装高度与盲区中心
+- 车体几何中心偏移
+
+6.3 QoS 与实时性
+- SensorDataQoS / KeepLast(1) / best_effort
+- intra-process communication
+- latest-state 消费策略
+- 队列深度与延迟
+
+
+============================================================
+七、数学基础（需要时补）
+============================================================
+
+- 李群李代数（SO(3)、SE(3)）
+- 四元数与旋转矩阵
+- 刚体变换与齐次坐标
+- 高斯分布与协方差传播
+- 最小二乘 / 最大后验估计
+- 拉格朗日乘子 / KKT 条件（优化部分）
+
+
+============================================================
+八、学习优先级建议
+============================================================
+
+按"先能看懂数据流，再补算法"的顺序：
+
+1. ROS 2 通信与 QoS（已会，快速过）
+2. 坐标系与 TF / 外参
+3. 点云去畸变与 LIO 框架
+4. 占据栅格与 ESDF
+5. A* / SMAC 路径搜索
+6. MINCO 轨迹优化思想
+7. SE(2) MPC
+8. Behavior Tree
+
+其中 LIO、ESDF、MINCO、MPC 是这份代码的四个核心算法硬骨头，建议每个都单独花时间。
+
+
+============================================================
+九、书单 / 论文 / 视频资源
+============================================================
+
+9.1 书籍
+------
+- 《自动驾驶与机器人中的 SLAM 技术》高翔
+  作用：LIO、点云处理、状态估计入门最推荐的中文书。
+
+- 《视觉 SLAM 十四讲：从理论到实践》高翔
+  作用：补李群李代数、BA、非线性优化基础。
+
+- 《Planning Algorithms》Steven M. LaValle
+  作用：路径规划、搜索算法、运动规划经典教材，网上有免费电子版。
+
+- 《Numerical Optimization》Jorge Nocedal, Stephen Wright
+  作用：理解优化问题、约束、KKT、梯度下降/牛顿法/内点法。
+
+- 《Underactuated Robotics》Russ Tedrake（MIT，网上免费）
+  作用：MPC、最优控制、机器人动力学。
+
+
+9.2 论文（按模块分类）
+--------
+LIO / 雷达里程计：
+- "Point-LIO: Robust High-Bandwidth Light Detection and Ranging Inertial Odometry"
+  作用：本仓库 Point-LIO 模块的直接来源。
+
+- "FAST-LIO: A Fast, Robust LiDAR-inertial Odometry Package by Tightly-Coupled Iterated Kalman Filter"
+
+- "FAST-LIO2: Fast Direct LiDAR-Inertial Odometry"
+
+- "LOAM: Lidar Odometry and Mapping in Real-time"
+
+- "LIO-SAM: Tightly-coupled Lidar Inertial Odometry via Smoothing and Mapping"
+
+地图 / ESDF：
+- "ROG-Map: An Efficient Robocentric Occupancy Grid Map for Large-scale and High-resolution Environment Mapping"（HKU SUPER 系列）
+
+- "FIESTA: Fast Incremental Euclidean Distance Fields for Online Motion Planning of Aerial Robots"
+
+- "Voxblox: Incremental 3D Euclidean Signed Distance Fields for On-Board MAV Planning"
+
+规划 / 轨迹优化：
+- "Geometrically Constrained Trajectory Optimization for Multicopters"（MINCO 原论文）
+
+- "GCOPTER: Fast Generation of Feasible, Smooth, and Safe Trajectories for Multicopters"
+
+- "B-spline-based Collision-free Motion Planning for Mobile Robots"
+
+控制 / MPC：
+- "Model Predictive Control: Theory and Design" James Rawlings
+
+- "Model Predictive Control" Francesco Borrelli
+
+- "Applied Optimal Control" Bryson & Ho
+
+行为树：
+- "Behavior Trees in Robotics and AI: An Introduction" Michele Colledanchise, Petter Ögren
+  作用：BehaviorTree.CPP 的理论基础。
+
+
+9.3 视频 / 在线课程
+--------
+- 高飞《移动机器人运动规划》（B 站/深蓝学院）
+  作用：路径搜索、样条、MINCO、优化，中文讲解清晰。
+
+- 高翔《SLAM 十四讲》配套视频
+  作用：补 SLAM 数学基础。
+
+- 深蓝学院《视觉 SLAM》《激光 SLAM》《运动规划》课程
+  作用：体系化课程，适合系统学习。
+
+- MIT 6.832 Underactuated Robotics（Russ Tedrake）
+  作用：MPC、最优控制、机器人动力学。
+
+- ETH Zurich Robot Dynamics / Control Courses
+  作用：机器人建模与控制。
+
+- 赵虚左 ROS 2 理论与实践
+  作用：ROS 2 进阶、QoS、组件、launch（你已 L2-L3，可选补）。
+
+
+9.4 开源仓库 / 代码参考
+--------
+- Point-LIO 官方仓库
+  github.com/hku-mars/Point-LIO
+
+- FAST-LIO2 官方仓库
+  github.com/hku-mars/FAST_LIO
+
+- ROG-Map / SUPER 官方仓库
+  github.com/hku-mars/SUPER
+
+- GCOPTER
+  github.com/ZJU-FAST-Lab/GCOPTER
+
+- Navigation2
+  github.com/ros-navigation/navigation2
+
+- BehaviorTree.CPP
+  github.com/BehaviorTree/BehaviorTree.CPP
+
+- qpOASES
+  github.com/coin-or/qpOASES
+
+
+9.5 本仓库应配合阅读的文档
+--------
+- src/perception/Point-LIO/README.md
+- src/perception/rog_map/README.md
+- src/navigation/minco_planner/README.md
+- src/navigation/minco_controller/README.md
+- src/decision/bt_manager/README.md
+- src/navigation/communication/README.md
+- src/perception/livox_ros_driver2/README.md
+- README.md（根目录系统架构与数据流章节）
+
+
+============================================================
+十、建议的下一步
+============================================================
+
+1. 先按"学习优先级建议"的顺序，逐一攻克 LIO、ESDF、MINCO、MPC。
+2. 每学一个算法，回来看本仓库对应模块的源码和 README。
+3. 用本仓库的 launch + YAML 作为"真实参数案例"，验证你对算法参数的理解。
+4. 没有硬件时，重点理解数据流和参数含义；有硬件后再验证动态行为。
+
+============================================================
+文件结束
+============================================================
