@@ -727,6 +727,16 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
   geometry_msgs::msg::TwistStamped cmd;
   cmd.header.stamp = now;
   cmd.header.frame_id = global_frame_;
+  auto publish_mpc_cmd = [this](const double vx, const double vy, const double wz) {
+    if (!cmd_vel_mpc_pub_) {
+      return;
+    }
+    geometry_msgs::msg::Twist raw_cmd;
+    raw_cmd.linear.x = vx;
+    raw_cmd.linear.y = vy;
+    raw_cmd.angular.z = wz;
+    cmd_vel_mpc_pub_->publish(raw_cmd);
+  };
 
   // Sync Nav2 success semantics: if GoalChecker says reached, output zero command immediately.
   if (goal_checker != nullptr) {
@@ -747,6 +757,7 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
       cmd.twist.linear.x = 0.0;
       cmd.twist.linear.y = 0.0;
       cmd.twist.angular.z = 0.0;
+      publish_mpc_cmd(0.0, 0.0, 0.0);
       return finish(cmd, true, "NONE");
     }
   }
@@ -767,6 +778,7 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
     cmd.twist.linear.x = 0.0;
     cmd.twist.linear.y = 0.0;
     cmd.twist.angular.z = 0.0;
+    publish_mpc_cmd(0.0, 0.0, 0.0);
     return finish(cmd, false, ok_ref ? "SOLVER_UNAVAILABLE" : "NO_REFERENCE");
   }
   if (perf && !ref.empty()) {
@@ -839,6 +851,7 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
     cmd.twist.linear.x = 0.0;
     cmd.twist.linear.y = 0.0;
     cmd.twist.angular.z = 0.0;
+    publish_mpc_cmd(0.0, 0.0, 0.0);
     return finish(cmd, false, "QP_FAILED");
   }
 
@@ -904,13 +917,8 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
       stop_mpc_cmd = (dist <= goal_pos_threshold);
     }
   }
-  if (cmd_vel_mpc_pub_) {
-    geometry_msgs::msg::Twist raw_cmd;
-    raw_cmd.linear.x = stop_mpc_cmd ? 0.0 : vx;
-    raw_cmd.linear.y = stop_mpc_cmd ? 0.0 : vy;
-    raw_cmd.angular.z = stop_mpc_cmd ? 0.0 : wz;
-    cmd_vel_mpc_pub_->publish(raw_cmd);
-  }
+  publish_mpc_cmd(
+    stop_mpc_cmd ? 0.0 : vx, stop_mpc_cmd ? 0.0 : vy, stop_mpc_cmd ? 0.0 : wz);
   // applyGravityCompensation(latest_odom, vx, vy);
   cmd.twist.linear.x = vx;
   cmd.twist.linear.y = vy;
