@@ -103,7 +103,7 @@ ping 192.168.1.122
 
 ```yaml
 # Previous baseline: [0.0, 0.4, 0.0, -0.35453, 0.0, 0.0]
-merge_extrinsic_back_to_front: [0.0, -0.25162, 0.25162, 1.57079633, 0.0, 0.0]
+merge_extrinsic_back_to_front: [0.0, -0.25162, 0.25162, -1.57079633, 0.0, 0.0]
 ```
 
 六个值的顺序以当前 merger 参数解析源码为准，通常包含 xyz 平移与 rpy 旋转。修改前必须：

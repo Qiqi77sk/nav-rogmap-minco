@@ -326,7 +326,7 @@ merge_back_ip: 192.168.1.122
 merge_output_topic: livox/lidar
 merge_max_interval_ms: 5.0
 # Previous baseline: [0.0, 0.4, 0.0, -0.35453, 0.0, 0.0]
-merge_extrinsic_back_to_front: [0.0, -0.25162, 0.25162, 1.57079633, 0.0, 0.0]
+merge_extrinsic_back_to_front: [0.0, -0.25162, 0.25162, -1.57079633, 0.0, 0.0]
 ```
 
 配置原则：
