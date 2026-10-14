@@ -18,4 +18,4 @@
     merge_max_interval_ms: 5.0
     # Previous extrinsic: [0.0, 0.38, -0.05, -0.36713, 0.0, 0.0]
     # 192.168.1.122 (left) -> 192.168.1.135 (right/main), provisional mechanical estimate.
-    merge_extrinsic_back_to_front: [0.0, -0.25162, 0.25162, -1.57079633, 0.0, 0.0]  #右主雷达
+    merge_extrinsic_back_to_front: [0.0, 0.25162, -0.25162, -1.57079633, 0.0, 0.0]  #右主雷达
