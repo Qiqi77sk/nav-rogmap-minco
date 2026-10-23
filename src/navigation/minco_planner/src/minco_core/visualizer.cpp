@@ -1,11 +1,13 @@
 #include "minco_core/visualizer.hpp"
 
 // C++ standard library
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <functional>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 
 namespace minco_planner {
 
@@ -45,10 +47,13 @@ void Visualizer::configure(const nav2_util::LifecycleNode::WeakPtr & parent, con
   // Markers
   control_points_vis_pub_ = node->create_publisher<visualization_msgs::msg::Marker>(
     "/minco_control_points_vis", rclcpp::QoS(rclcpp::KeepLast(1)).transient_local());
+  control_points_vis_array_pub_ =
+    node->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/minco_control_points_vis_array", rclcpp::QoS(rclcpp::KeepLast(1)).transient_local());
 
-  // 15Hz visualization timer
+  // 10 Hz visualization timer; planner updates stay at their own rate.
   visual_timer_ = node->create_wall_timer(
-    std::chrono::milliseconds(66), std::bind(&Visualizer::visualTimerCallback, this));
+    std::chrono::milliseconds(100), std::bind(&Visualizer::visualTimerCallback, this));
 }
 
 void Visualizer::cleanup()
@@ -84,6 +89,7 @@ void Visualizer::cleanup()
   recover_path_vis_pub_.reset();
   recover_goal_vis_pub_.reset();
   control_points_vis_pub_.reset();
+  control_points_vis_array_pub_.reset();
 
   std::lock_guard<std::mutex> lock(vis_mutex_);
   vis_control_points_.clear();
@@ -97,6 +103,84 @@ void Visualizer::cleanup()
   vis_candidate_valid_ = false;
   vis_candidate_reason_.clear();
   vis_candidate_opt_time_ = -1.0;
+}
+
+void Visualizer::clearPlanVisualization()
+{
+  auto node = node_.lock();
+  if (!node) {
+    return;
+  }
+
+  std_msgs::msg::Header header;
+  header.stamp = node->now();
+  header.frame_id = global_frame_;
+
+  std::lock_guard<std::mutex> lock(vis_mutex_);
+  vis_control_points_.clear();
+  vis_astar_path_ = nav_msgs::msg::Path();
+  vis_opt_time_ = -1.0;
+  has_vis_opt_traj_ = false;
+  has_vis_backup_traj_ = false;
+  has_vis_local_end_ = false;
+  vis_local_end_is_goal_ = false;
+  has_vis_candidate_traj_ = false;
+  vis_candidate_valid_ = false;
+  vis_candidate_reason_.clear();
+  vis_candidate_opt_time_ = -1.0;
+
+  nav_msgs::msg::Path empty_path;
+  empty_path.header = header;
+  if (backup_path_vis_pub_) {
+    backup_path_vis_pub_->publish(empty_path);
+  }
+  if (opt_path_vis_pub_) {
+    opt_path_vis_pub_->publish(empty_path);
+  }
+  if (candidate_path_vis_pub_) {
+    candidate_path_vis_pub_->publish(empty_path);
+  }
+  if (astar_path_vis_pub_) {
+    astar_path_vis_pub_->publish(empty_path);
+  }
+
+  if (control_points_vis_pub_) {
+    visualization_msgs::msg::Marker marker;
+    marker.header = header;
+    marker.action = visualization_msgs::msg::Marker::DELETE;
+    for (const auto & ns_id : std::array<std::pair<const char *, int>, 6>{{
+           {"minco_opt_waypoints", 0},
+           {"minco_opt_waypoints", 1},
+           {"opt_time", 0},
+           {"minco_local_end", 0},
+           {"minco_local_end", 1},
+           {"minco_candidate_status", 0},
+         }}) {
+      marker.ns = ns_id.first;
+      marker.id = ns_id.second;
+      control_points_vis_pub_->publish(marker);
+    }
+  }
+
+  if (control_points_vis_array_pub_) {
+    visualization_msgs::msg::MarkerArray marker_array;
+    visualization_msgs::msg::Marker marker;
+    marker.header = header;
+    marker.action = visualization_msgs::msg::Marker::DELETE;
+    for (const auto & ns_id : std::array<std::pair<const char *, int>, 6>{{
+           {"minco_opt_waypoints", 0},
+           {"minco_opt_waypoints", 1},
+           {"opt_time", 0},
+           {"minco_local_end", 0},
+           {"minco_local_end", 1},
+           {"minco_candidate_status", 0},
+         }}) {
+      marker.ns = ns_id.first;
+      marker.id = ns_id.second;
+      marker_array.markers.push_back(marker);
+    }
+    control_points_vis_array_pub_->publish(marker_array);
+  }
 }
 
 void Visualizer::publishRecoveryDebug(const geometry_msgs::msg::PoseStamped & current_pose,
@@ -244,8 +328,11 @@ void Visualizer::visualTimerCallback()
 
   std::lock_guard<std::mutex> lock(vis_mutex_);
 
+  visualization_msgs::msg::MarkerArray marker_array;
+
   // 1. A* Path
-  if (astar_path_vis_pub_ && !vis_astar_path_.poses.empty()) {
+  if (astar_path_vis_pub_ && astar_path_vis_pub_->get_subscription_count() > 0 &&
+      !vis_astar_path_.poses.empty()) {
     vis_astar_path_.header = header;
     for (auto & p : vis_astar_path_.poses) {
       p.header = header;
@@ -316,7 +403,10 @@ void Visualizer::visualTimerCallback()
     points_mk.color.a = 1.0f;
     if (!vis_waypoints.empty()) {
       points_mk.points = vis_waypoints;
-      control_points_vis_pub_->publish(points_mk);
+      if (control_points_vis_pub_ && control_points_vis_pub_->get_subscription_count() > 0) {
+        control_points_vis_pub_->publish(points_mk);
+      }
+      marker_array.markers.push_back(points_mk);
     }
 
     if (vis_waypoints.size() >= 2U) {
@@ -333,12 +423,16 @@ void Visualizer::visualTimerCallback()
       line_mk.color.b = 0.0f;
       line_mk.color.a = 1.0f;
       line_mk.points = vis_waypoints;
-      control_points_vis_pub_->publish(line_mk);
+      if (control_points_vis_pub_ && control_points_vis_pub_->get_subscription_count() > 0) {
+        control_points_vis_pub_->publish(line_mk);
+      }
+      marker_array.markers.push_back(line_mk);
     }
   }
 
   // 3. Backup Path
-  if (backup_path_vis_pub_ && has_vis_backup_traj_ && vis_backup_traj_.getTotalDuration() > 1e-3) {
+  if (backup_path_vis_pub_ && backup_path_vis_pub_->get_subscription_count() > 0 &&
+      has_vis_backup_traj_ && vis_backup_traj_.getTotalDuration() > 1e-3) {
     const double t_step = 0.05;
     const int steps = static_cast<int>(std::ceil(vis_backup_traj_.getTotalDuration() / t_step)) + 1;
     auto path_msg = convertTrajectoryToPath(vis_backup_traj_, header, steps, t_step);
@@ -346,7 +440,8 @@ void Visualizer::visualTimerCallback()
   }
 
   // 4. Optimized Path
-  if (opt_path_vis_pub_ && has_vis_opt_traj_ && vis_opt_traj_.getTotalDuration() > 1e-3) {
+  if (opt_path_vis_pub_ && opt_path_vis_pub_->get_subscription_count() > 0 &&
+      has_vis_opt_traj_ && vis_opt_traj_.getTotalDuration() > 1e-3) {
     const double t_step = 0.05;
     const int steps = static_cast<int>(std::ceil(vis_opt_traj_.getTotalDuration() / t_step)) + 1;
     auto path_msg = convertTrajectoryToPath(vis_opt_traj_, header, steps, t_step);
@@ -377,7 +472,7 @@ void Visualizer::visualTimerCallback()
     std::stringstream ss;
     ss << std::fixed << std::setprecision(2) << (vis_opt_time_ * 1000.0) << " ms";
     mk.text = ss.str();
-    control_points_vis_pub_->publish(mk);
+    marker_array.markers.push_back(mk);
   }
 
   // 6. Local path clipping endpoint (independent of accepted trajectory state).
@@ -400,25 +495,25 @@ void Visualizer::visualTimerCallback()
       mk.color.g = vis_local_end_is_goal_ ? 1.0f : 0.0f;
       mk.color.b = vis_local_end_is_goal_ ? 0.0f : 1.0f;
       mk.color.a = 1.0f;
-      control_points_vis_pub_->publish(mk);
+      marker_array.markers.push_back(mk);
 
       mk.id = 1;
       mk.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
       mk.pose.position.z = vis_local_end_.z() + 0.55;
       mk.scale.z = 0.25;
       mk.text = vis_local_end_is_goal_ ? "GLOBAL GOAL" : "LOCAL END";
-      control_points_vis_pub_->publish(mk);
+      marker_array.markers.push_back(mk);
     } else {
       mk.action = visualization_msgs::msg::Marker::DELETE;
       mk.id = 0;
-      control_points_vis_pub_->publish(mk);
+      marker_array.markers.push_back(mk);
       mk.id = 1;
-      control_points_vis_pub_->publish(mk);
+      marker_array.markers.push_back(mk);
     }
   }
 
   // 7. Pre-validation optimizer candidate path.
-  if (candidate_path_vis_pub_) {
+  if (candidate_path_vis_pub_ && candidate_path_vis_pub_->get_subscription_count() > 0) {
     nav_msgs::msg::Path path_msg;
     path_msg.header = header;
     if (has_vis_candidate_traj_ && vis_candidate_traj_.getTotalDuration() > 1e-3) {
@@ -461,11 +556,17 @@ void Visualizer::visualTimerCallback()
         mk.color.r = 1.0f;
         mk.color.g = 0.5f;
       }
-      control_points_vis_pub_->publish(mk);
+      marker_array.markers.push_back(mk);
     } else {
       mk.action = visualization_msgs::msg::Marker::DELETE;
-      control_points_vis_pub_->publish(mk);
+      marker_array.markers.push_back(mk);
     }
+  }
+
+  if (control_points_vis_array_pub_ &&
+      control_points_vis_array_pub_->get_subscription_count() > 0 &&
+      !marker_array.markers.empty()) {
+    control_points_vis_array_pub_->publish(marker_array);
   }
 }
 

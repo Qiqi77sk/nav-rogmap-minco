@@ -113,6 +113,16 @@ public:
     msg.header.stamp = stamp;
     msg.capacitor_capacity = in.capacitor_capacity;
     msg.tunnel_yaw_aligned = in.tunnel_yaw_aligned;
+    msg.chassis_imu_yaw_deg = in.chassis_imu_yaw;
+    msg.chassis_yaw_camerainit = std::numeric_limits<double>::quiet_NaN();
+    {
+      std::lock_guard<std::mutex> lk(state_mutex_);
+      if (delta_yaw_initialized_ && std::isfinite(in.chassis_imu_yaw)) {
+        const double chassis_yaw_deg = std::remainder(
+          static_cast<double>(in.chassis_imu_yaw) + delta_yaw_, 360.0);
+        msg.chassis_yaw_camerainit = chassis_yaw_deg * M_PI / 180.0;
+      }
+    }
     std::chrono::steady_clock::time_point publish_start{};
     if (performance_diagnostics_enabled_) {
       publish_start = std::chrono::steady_clock::now();

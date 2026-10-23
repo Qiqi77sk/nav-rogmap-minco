@@ -365,6 +365,36 @@ void MincoPlanner::configure(const nav2_util::LifecycleNode::WeakPtr & parent,
     node, prefix + "minco_optimizer.traj_goal_tolerance", rclcpp::ParameterValue(0.3));
   node->get_parameter(prefix + "minco_optimizer.traj_goal_tolerance", traj_goal_tolerance_);
 
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "goal_heading.enable", rclcpp::ParameterValue(false));
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "goal_heading.brake_trigger_dist", rclcpp::ParameterValue(1.0));
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "goal_heading.blend_width", rclcpp::ParameterValue(0.5));
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "goal_heading.yaw_goal_tolerance", rclcpp::ParameterValue(0.15));
+  node->get_parameter(prefix + "goal_heading.enable", goal_heading_enable_);
+  node->get_parameter(prefix + "goal_heading.brake_trigger_dist", goal_heading_brake_trigger_dist_);
+  node->get_parameter(prefix + "goal_heading.blend_width", goal_heading_blend_width_);
+  node->get_parameter(prefix + "goal_heading.yaw_goal_tolerance", yaw_goal_tolerance_);
+  if (!std::isfinite(goal_heading_brake_trigger_dist_) || goal_heading_brake_trigger_dist_ <= 0.0) {
+    goal_heading_brake_trigger_dist_ = 1.0;
+  }
+  if (!std::isfinite(goal_heading_blend_width_) || goal_heading_blend_width_ <= 1.0e-3) {
+    goal_heading_blend_width_ = 0.5;
+  }
+  if (!std::isfinite(yaw_goal_tolerance_) || yaw_goal_tolerance_ <= 0.0) {
+    yaw_goal_tolerance_ = 0.15;
+  }
+  yaw_goal_tolerance_ = std::min(yaw_goal_tolerance_, M_PI);
+  RCLCPP_INFO(logger_,
+    "[MincoPlanner] goal_heading enable=%s, brake_trigger_dist=%.3f, blend_width=%.3f, "
+    "yaw_goal_tolerance=%.3f",
+    goal_heading_enable_ ? "true" : "false",
+    goal_heading_brake_trigger_dist_,
+    goal_heading_blend_width_,
+    yaw_goal_tolerance_);
+
   // --- Optimizer config ------------------------------------------------------
 
   nav2_util::declare_parameter_if_not_declared(
@@ -559,6 +589,9 @@ void MincoPlanner::configure(const nav2_util::LifecycleNode::WeakPtr & parent,
       }
 
     });
+  chassis_info_sub_ = node->create_subscription<ros_interfaces::msg::SentryInfoOffline>(
+    "/sentry/offline_info", rclcpp::QoS(rclcpp::KeepLast(10)),
+    std::bind(&MincoPlanner::onChassisInfo, this, std::placeholders::_1));
 
   visualizer_ = std::make_unique<Visualizer>();
   visualizer_->configure(parent, output_frame_);
@@ -641,6 +674,7 @@ void MincoPlanner::cleanup()
   opt_path_pub_.reset();
   backup_path_pub_.reset();
   odom_sub_.reset();
+  chassis_info_sub_.reset();
   costmap_ros_.reset();
   map_.reset();
   rog_query_raw_.reset();
@@ -906,18 +940,34 @@ bool MincoPlanner::PlanGlobalPath(
   };
 
   if (!global_path_searcher_ || !mode_context_) {
+    clearPlanVisualization();
     return false;
   }
   std::vector<geometry_msgs::msg::PoseStamped> planned_path;
-  if (!global_path_searcher_->plan(start, goal, *mode_context_, planned_path)) {
+  if (!global_path_searcher_->plan(start, goal, *mode_context_, planned_path) || planned_path.size() < 2U) {
     record_search_time();
+    clearPlanVisualization();
     return false;
   }
   record_search_time();
 
+  // SMAC/A* only guarantees endpoint position; preserve the caller's goal heading explicitly.
+  const auto & goal_orientation = goal.pose.orientation;
+  const double orientation_norm_sq =
+    goal_orientation.x * goal_orientation.x + goal_orientation.y * goal_orientation.y +
+    goal_orientation.z * goal_orientation.z + goal_orientation.w * goal_orientation.w;
+  if (std::isfinite(orientation_norm_sq) && orientation_norm_sq > 1.0e-6) {
+    planned_path.back().pose.orientation = goal_orientation;
+  } else {
+    planned_path.back().pose.orientation.x = 0.0;
+    planned_path.back().pose.orientation.y = 0.0;
+    planned_path.back().pose.orientation.z = 0.0;
+    planned_path.back().pose.orientation.w = 1.0;
+  }
+
   std::lock_guard<std::mutex> path_lock(path_mutex_);
   latest_global_path_ = std::move(planned_path);
-  return latest_global_path_.size() >= 2U;
+  return true;
 }
 
 bool MincoPlanner::ReplanLocal(const geometry_msgs::msg::PoseStamped & current_pose)
@@ -964,7 +1014,7 @@ bool MincoPlanner::ReplanLocal(const geometry_msgs::msg::PoseStamped & current_p
 
   // Snapshot the global goal for end-state logic.
   Eigen::Vector3d global_goal(0.0, 0.0, 0.0);
-  double goal_yaw = 0.0;
+  double goal_heading_yaw = 0.0;
   std::vector<geometry_msgs::msg::PoseStamped> global_path_snapshot;
   {
     std::lock_guard<std::mutex> lock(path_mutex_);
@@ -975,8 +1025,11 @@ bool MincoPlanner::ReplanLocal(const geometry_msgs::msg::PoseStamped & current_p
     global_goal.x() = latest_global_path_.back().pose.position.x;
     global_goal.y() = latest_global_path_.back().pose.position.y;
     global_goal.z() = 0.0;
-    goal_yaw = utils::quaternionToYaw(latest_global_path_.back().pose.orientation);
+    goal_heading_yaw = utils::quaternionToYaw(latest_global_path_.back().pose.orientation);
   }
+  const double current_goal_distance = std::hypot(
+    current_pose.pose.position.x - global_goal.x(),
+    current_pose.pose.position.y - global_goal.y());
 
   const LocalPathSeed seed =
     local_path_processor_->buildSeed(global_path_snapshot, current_pose, *mode_context_);
@@ -1215,6 +1268,7 @@ bool MincoPlanner::ReplanLocal(const geometry_msgs::msg::PoseStamped & current_p
   }
 
   constexpr double slope_threshold = 0.1;
+  double goal_yaw = getCurrentYawFromOdom();
   if (std::abs(pitch) > slope_threshold && sparse_path.size() >= 2) {
     goal_yaw = std::atan2(end_state.col(1).y(), end_state.col(1).x());
   } else if (sparse_path.size() >= 2) {
@@ -1227,11 +1281,33 @@ bool MincoPlanner::ReplanLocal(const geometry_msgs::msg::PoseStamped & current_p
   } else {
     goal_yaw = getCurrentYawFromOdom();
   }
+  if (goal_heading_enable_ && std::abs(pitch) > slope_threshold && sparse_path.size() >= 2 &&
+      end_state.col(1).head<2>().norm() <= 0.1) {
+    const Eigen::Vector2d tail_dir =
+      (sparse_path.back() - sparse_path[sparse_path.size() - 2]).head<2>();
+    if (tail_dir.norm() > 0.1) {
+      goal_yaw = std::atan2(tail_dir.y(), tail_dir.x());
+    }
+  }
+
+  bool goal_heading_active = false;
+  if (goal_heading_enable_ && std::isfinite(current_goal_distance) &&
+      current_goal_distance <= goal_heading_brake_trigger_dist_) {
+    const double blend_ratio = std::clamp(
+      (goal_heading_brake_trigger_dist_ - current_goal_distance) / goal_heading_blend_width_,
+      0.0, 1.0);
+    const double yaw_delta = std::atan2(
+      std::sin(goal_heading_yaw - goal_yaw),
+      std::cos(goal_heading_yaw - goal_yaw));
+    goal_yaw += blend_ratio * yaw_delta;
+    goal_heading_active = true;
+  }
 
   traj_opt::Trajectory yaw_traj;
   if (use_yaw_opt_) {
     const bool yaw_success =
-      optimizeYaw(start_state, opt_traj, yaw_traj, state, current_pose.pose, goal_yaw);
+      optimizeYaw(
+        start_state, opt_traj, yaw_traj, state, current_pose.pose, goal_yaw, !goal_heading_active);
     if (!yaw_success) {
       std::cout << YELLOW
                 << "[MincoPlanner] Yaw optimization failed. Falling back to constant yaw trajectory."
@@ -1513,7 +1589,8 @@ bool MincoPlanner::optimizeYaw(const Eigen::Matrix3d & start_state,
   traj_opt::Trajectory & out_yaw_traj,
   PlanningState state,
   const geometry_msgs::msg::Pose & current_pose,
-  double goal_yaw)
+  double goal_yaw,
+  bool free_goal)
 {
   (void)current_pose;
 
@@ -1561,7 +1638,7 @@ bool MincoPlanner::optimizeYaw(const Eigen::Matrix3d & start_state,
   goal_yaw_state(0) = init_yaw_state(0) + yaw_err;
   goal_yaw_state(1) = 0.0;
 
-  return yaw_opt_->optimize(init_yaw_state, goal_yaw_state, pos_traj, out_yaw_traj, 5, false, true);
+  return yaw_opt_->optimize(init_yaw_state, goal_yaw_state, pos_traj, out_yaw_traj, 5, false, free_goal);
 }
 
 // -----------------------------------------------------------------------------
@@ -1770,6 +1847,17 @@ bool MincoPlanner::consumePendingGoal(geometry_msgs::msg::PoseStamped & goal_out
   return true;
 }
 
+void MincoPlanner::clearPlanVisualization()
+{
+  {
+    std::lock_guard<std::mutex> lock(path_mutex_);
+    latest_global_path_.clear();
+  }
+  if (visualizer_) {
+    visualizer_->clearPlanVisualization();
+  }
+}
+
 void MincoPlanner::cancelGoal()
 {
   std::lock_guard<std::mutex> lk(goal_mutex_);
@@ -1879,11 +1967,24 @@ bool MincoPlanner::checkGoalReached(const geometry_msgs::msg::PoseStamped & curr
     return false;
   }
 
-  const auto & goal = latest_global_path_.back().pose.position;
+  const auto & goal_pose = latest_global_path_.back().pose;
+  const auto & goal = goal_pose.position;
   const double dx = current_pose.pose.position.x - goal.x;
   const double dy = current_pose.pose.position.y - goal.y;
   const double dist = std::hypot(dx, dy);
-  return std::isfinite(dist) && dist <= traj_goal_tolerance_;
+  if (!std::isfinite(dist) || dist > traj_goal_tolerance_) {
+    return false;
+  }
+  if (!goal_heading_enable_) {
+    return true;
+  }
+
+  const double current_yaw =
+    goal_heading_enable_ ? getCurrentYawFromOdom() : utils::quaternionToYaw(current_pose.pose.orientation);
+  const double goal_yaw = utils::quaternionToYaw(goal_pose.orientation);
+  const double yaw_error =
+    std::atan2(std::sin(goal_yaw - current_yaw), std::cos(goal_yaw - current_yaw));
+  return std::isfinite(yaw_error) && std::abs(yaw_error) <= yaw_goal_tolerance_;
 }
 
 Eigen::Vector3d MincoPlanner::getCurrentSpeed() const
@@ -1916,8 +2017,50 @@ Eigen::Vector3d MincoPlanner::getCurrentSpeed() const
   return Eigen::Vector3d::Zero();
 }
 
+void MincoPlanner::onChassisInfo(const ros_interfaces::msg::SentryInfoOffline::SharedPtr msg)
+{
+  if (!msg || !std::isfinite(msg->chassis_yaw_camerainit)) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(chassis_yaw_mutex_);
+  latest_chassis_yaw_camerainit_ = msg->chassis_yaw_camerainit;
+  latest_chassis_yaw_rx_ = std::chrono::steady_clock::now();
+}
+
+bool MincoPlanner::getFreshChassisYawCameraInit(double & yaw) const
+{
+  std::lock_guard<std::mutex> lock(chassis_yaw_mutex_);
+  if (latest_chassis_yaw_rx_ == std::chrono::steady_clock::time_point{}) {
+    return false;
+  }
+  const double age_s =
+    std::chrono::duration<double>(std::chrono::steady_clock::now() - latest_chassis_yaw_rx_).count();
+  if (!std::isfinite(latest_chassis_yaw_camerainit_) || age_s > 0.25) {
+    return false;
+  }
+  yaw = latest_chassis_yaw_camerainit_;
+  return true;
+}
+
 double MincoPlanner::getCurrentYawFromOdom() const
 {
+  double chassis_yaw = 0.0;
+  if (goal_heading_enable_ && getFreshChassisYawCameraInit(chassis_yaw)) {
+    if (planning_frame_ == rog_frame_) {
+      return chassis_yaw;
+    }
+    if (tf_) {
+      try {
+        const auto transform =
+          tf_->lookupTransform(planning_frame_, rog_frame_, tf2::TimePointZero);
+        const double yaw_in_planning =
+          chassis_yaw + utils::quaternionToYaw(transform.transform.rotation);
+        return std::atan2(std::sin(yaw_in_planning), std::cos(yaw_in_planning));
+      } catch (const tf2::TransformException &) {
+      }
+    }
+  }
+
   std::lock_guard<std::mutex> lk(odom_mutex_);
   if (!has_latest_odom_) {
     return 0.0;

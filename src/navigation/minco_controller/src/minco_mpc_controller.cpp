@@ -161,6 +161,12 @@ void MincoMpcController::configure(const rclcpp_lifecycle::LifecycleNode::WeakPt
   nav2_util::declare_parameter_if_not_declared(node, name + ".lidar_offset_y", rclcpp::ParameterValue(0.0));
   nav2_util::declare_parameter_if_not_declared(
     node, name + ".lidar_roll_offset", rclcpp::ParameterValue(0.0));
+  nav2_util::declare_parameter_if_not_declared(
+    node, name + ".goal_heading.enable", rclcpp::ParameterValue(false));
+  nav2_util::declare_parameter_if_not_declared(
+    node, name + ".goal_heading.yaw_goal_tolerance", rclcpp::ParameterValue(0.15));
+  nav2_util::declare_parameter_if_not_declared(
+    node, name + ".goal_heading.stall_timeout_sec", rclcpp::ParameterValue(1.5));
 
   double dt = 0.05;
   double lookahead_time = 0.5;
@@ -206,6 +212,21 @@ void MincoMpcController::configure(const rclcpp_lifecycle::LifecycleNode::WeakPt
   node->get_parameter(name + ".lidar_offset_x", lidar_offset_x_);
   node->get_parameter(name + ".lidar_offset_y", lidar_offset_y_);
   node->get_parameter(name + ".lidar_roll_offset", lidar_roll_offset_);
+  node->get_parameter(name + ".goal_heading.enable", goal_heading_enable_);
+  node->get_parameter(name + ".goal_heading.yaw_goal_tolerance", yaw_goal_tolerance_);
+  node->get_parameter(name + ".goal_heading.stall_timeout_sec", heading_stall_timeout_sec_);
+  if (!std::isfinite(yaw_goal_tolerance_) || yaw_goal_tolerance_ <= 0.0) {
+    yaw_goal_tolerance_ = 0.15;
+  }
+  yaw_goal_tolerance_ = std::min(yaw_goal_tolerance_, M_PI);
+  if (!std::isfinite(heading_stall_timeout_sec_) || heading_stall_timeout_sec_ <= 0.1) {
+    heading_stall_timeout_sec_ = 1.5;
+  }
+  RCLCPP_INFO(logger_,
+    "%s: goal_heading enable=%s, yaw_goal_tolerance=%.3f",
+    name_.c_str(),
+    goal_heading_enable_ ? "true" : "false",
+    yaw_goal_tolerance_);
 
   solver_ = std::make_unique<MpcSolver>(mpc_config_);
 
@@ -219,11 +240,15 @@ void MincoMpcController::configure(const rclcpp_lifecycle::LifecycleNode::WeakPt
   odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>("/aft_mapped_to_init",
     odom_qos,
     std::bind(&MincoMpcController::onOdom, this, std::placeholders::_1));
+  chassis_info_sub_ = node->create_subscription<ros_interfaces::msg::SentryInfoOffline>(
+    "/sentry/offline_info", rclcpp::QoS(rclcpp::KeepLast(10)),
+    std::bind(&MincoMpcController::onChassisInfo, this, std::placeholders::_1));
 
   mpc_predict_path_pub_ = node->create_publisher<nav_msgs::msg::Path>("/mpc_predict_path", 1);
   mpc_real_path_pub_ = node->create_publisher<nav_msgs::msg::Path>("/mpc_real_path", 1);
   cmd_vel_mpc_pub_ = node->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel_mpc", 1);
   real_path_history_.clear();
+  last_predict_path_pub_time_ = node->now();
   last_real_path_pub_time_ = node->now();
 
   RCLCPP_INFO(logger_,
@@ -299,6 +324,7 @@ void MincoMpcController::cleanup()
   mpc_perf_monitor_.close();
   opt_path_sub_.reset();
   odom_sub_.reset();
+  chassis_info_sub_.reset();
   mpc_predict_path_pub_.reset();
   mpc_real_path_pub_.reset();
   cmd_vel_mpc_pub_.reset();
@@ -355,6 +381,17 @@ void MincoMpcController::onOdom(const nav_msgs::msg::Odometry::SharedPtr msg)
 
   std::lock_guard<std::mutex> lk(data_mtx_);
   latest_odom_ = msg;
+}
+
+void MincoMpcController::onChassisInfo(
+  const ros_interfaces::msg::SentryInfoOffline::SharedPtr msg)
+{
+  if (!msg || !std::isfinite(msg->chassis_yaw_camerainit)) {
+    return;
+  }
+  std::lock_guard<std::mutex> lk(chassis_yaw_mtx_);
+  latest_chassis_yaw_camerainit_ = msg->chassis_yaw_camerainit;
+  latest_chassis_yaw_rx_ = std::chrono::steady_clock::now();
 }
 
 bool MincoMpcController::transformPathToOdom(const ros_interfaces::msg::MpcPositionCommand::SharedPtr & opt,
@@ -691,10 +728,22 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
   }
 
   // 1) 构造当前状态（基于 pose + 最新里程计速度，用于延迟补偿）
+  double actual_heading_yaw = normalizeYaw(tf2::getYaw(pose.pose.orientation));
+  if (goal_heading_enable_) {
+    std::lock_guard<std::mutex> lk(chassis_yaw_mtx_);
+    const double age_s =
+      latest_chassis_yaw_rx_ == std::chrono::steady_clock::time_point{}
+        ? std::numeric_limits<double>::infinity()
+        : std::chrono::duration<double>(std::chrono::steady_clock::now() - latest_chassis_yaw_rx_).count();
+    if (std::isfinite(latest_chassis_yaw_camerainit_) && age_s <= 0.25) {
+      actual_heading_yaw = normalizeYaw(latest_chassis_yaw_camerainit_);
+    }
+  }
+
   State curr;
   curr.x = pose.pose.position.x;
   curr.y = pose.pose.position.y;
-  curr.yaw = normalizeYaw(tf2::getYaw(pose.pose.orientation));
+  curr.yaw = actual_heading_yaw;
   if (latest_odom) {
     double vx = latest_odom->twist.twist.linear.x;
     double vy = latest_odom->twist.twist.linear.y;
@@ -750,15 +799,40 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
       }
     }
 
-    if (has_goal_pose && goal_checker->isGoalReached(pose.pose, goal_pose.pose, velocity)) {
-      std::lock_guard<std::mutex> lk(data_mtx_);
-      has_tracked_ref_ = false;
-      latest_opt_path_.reset();
-      cmd.twist.linear.x = 0.0;
-      cmd.twist.linear.y = 0.0;
-      cmd.twist.angular.z = 0.0;
-      publish_mpc_cmd(0.0, 0.0, 0.0);
-      return finish(cmd, true, "NONE");
+    geometry_msgs::msg::Pose goal_check_pose = pose.pose;
+    if (goal_heading_enable_) {
+      tf2::Quaternion heading_q;
+      heading_q.setRPY(0.0, 0.0, actual_heading_yaw);
+      goal_check_pose.orientation = tf2::toMsg(heading_q);
+    }
+    if (has_goal_pose && goal_checker->isGoalReached(goal_check_pose, goal_pose.pose, velocity)) {
+      bool heading_ok = true;
+      if (goal_heading_enable_) {
+        geometry_msgs::msg::PoseStamped goal_pose_in_odom = goal_pose;
+        try {
+          if (goal_pose_in_odom.header.frame_id != odom_frame_) {
+            goal_pose_in_odom = tf_->transform(goal_pose_in_odom, odom_frame_);
+          }
+          const double goal_yaw = normalizeYaw(tf2::getYaw(goal_pose_in_odom.pose.orientation));
+          const double yaw_error =
+            std::atan2(
+              std::sin(goal_yaw - actual_heading_yaw),
+              std::cos(goal_yaw - actual_heading_yaw));
+          heading_ok = std::isfinite(yaw_error) && std::abs(yaw_error) <= yaw_goal_tolerance_;
+        } catch (const tf2::TransformException &) {
+          heading_ok = false;
+        }
+      }
+      if (heading_ok) {
+        std::lock_guard<std::mutex> lk(data_mtx_);
+        has_tracked_ref_ = false;
+        latest_opt_path_.reset();
+        cmd.twist.linear.x = 0.0;
+        cmd.twist.linear.y = 0.0;
+        cmd.twist.angular.z = 0.0;
+        publish_mpc_cmd(0.0, 0.0, 0.0);
+        return finish(cmd, true, "NONE");
+      }
     }
   }
 
@@ -894,6 +968,8 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
   }
   constexpr double goal_pos_threshold = 0.3;
   bool stop_mpc_cmd = false;
+  bool near_goal_for_heading = false;
+  double heading_error_abs = std::numeric_limits<double>::infinity();
   geometry_msgs::msg::PoseStamped goal_pose_stamped;
   {
     std::lock_guard<std::mutex> lk(plan_mtx_);
@@ -914,15 +990,64 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
       const double dx = pose.pose.position.x - goal_pose_in_odom.pose.position.x;
       const double dy = pose.pose.position.y - goal_pose_in_odom.pose.position.y;
       const double dist = std::hypot(dx, dy);
-      stop_mpc_cmd = (dist <= goal_pos_threshold);
+      bool yaw_aligned = true;
+      if (goal_heading_enable_) {
+        const double goal_yaw = normalizeYaw(tf2::getYaw(goal_pose_in_odom.pose.orientation));
+        const double yaw_error =
+          std::atan2(
+            std::sin(goal_yaw - actual_heading_yaw),
+            std::cos(goal_yaw - actual_heading_yaw));
+        heading_error_abs = std::abs(yaw_error);
+        near_goal_for_heading = dist <= goal_pos_threshold;
+        yaw_aligned = std::isfinite(yaw_error) && std::abs(yaw_error) <= yaw_goal_tolerance_;
+      }
+      stop_mpc_cmd = (dist <= goal_pos_threshold) && yaw_aligned;
     }
   }
-  publish_mpc_cmd(
-    stop_mpc_cmd ? 0.0 : vx, stop_mpc_cmd ? 0.0 : vy, stop_mpc_cmd ? 0.0 : wz);
+
+  if (goal_heading_enable_ && near_goal_for_heading && std::isfinite(heading_error_abs) &&
+      heading_error_abs > yaw_goal_tolerance_) {
+    const auto progress_now = std::chrono::steady_clock::now();
+    if (!heading_progress_active_ ||
+        heading_error_abs < heading_best_error_ - 0.02) {
+      heading_progress_active_ = true;
+      heading_best_error_ = heading_error_abs;
+      heading_progress_start_ = progress_now;
+    } else {
+      const double stalled_s =
+        std::chrono::duration<double>(progress_now - heading_progress_start_).count();
+      if (stalled_s > heading_stall_timeout_sec_) {
+        cmd.twist.linear.x = 0.0;
+        cmd.twist.linear.y = 0.0;
+        cmd.twist.angular.z = 0.0;
+        publish_mpc_cmd(0.0, 0.0, 0.0);
+        {
+          std::lock_guard<std::mutex> lk(data_mtx_);
+          has_tracked_ref_ = false;
+          latest_opt_path_.reset();
+        }
+        RCLCPP_ERROR_THROTTLE(
+          logger_,
+          *node->get_clock(),
+          1000,
+          "[MincoMpc] Heading alignment stalled at %.3f rad; stopping rotation.",
+          heading_error_abs);
+        return finish(cmd, false, "HEADING_STALL");
+      }
+    }
+  } else {
+    heading_progress_active_ = false;
+    heading_best_error_ = std::numeric_limits<double>::infinity();
+  }
+
+  const double output_vx = stop_mpc_cmd ? 0.0 : vx;
+  const double output_vy = stop_mpc_cmd ? 0.0 : vy;
+  const double output_wz = stop_mpc_cmd ? 0.0 : wz;
+  publish_mpc_cmd(output_vx, output_vy, output_wz);
   // applyGravityCompensation(latest_odom, vx, vy);
-  cmd.twist.linear.x = vx;
-  cmd.twist.linear.y = vy;
-  cmd.twist.angular.z = wz;
+  cmd.twist.linear.x = output_vx;
+  cmd.twist.linear.y = output_vy;
+  cmd.twist.angular.z = output_wz;
   return finish(cmd, true, "NONE");
 }
 
@@ -936,7 +1061,8 @@ void MincoMpcController::publishVisualization(
   rclcpp::Time now = node->now();
 
   // 1. 发布预测路径
-  if (mpc_predict_path_pub_ && mpc_predict_path_pub_->get_subscription_count() > 0 && !pred_path.empty()) {
+  if (mpc_predict_path_pub_ && mpc_predict_path_pub_->get_subscription_count() > 0 &&
+      !pred_path.empty() && (now - last_predict_path_pub_time_).seconds() >= 0.05) {
     nav_msgs::msg::Path path_msg;
     path_msg.header.stamp = now;
     path_msg.header.frame_id = global_frame_;
@@ -954,6 +1080,7 @@ void MincoMpcController::publishVisualization(
       path_msg.poses.push_back(ps);
     }
     mpc_predict_path_pub_->publish(path_msg);
+    last_predict_path_pub_time_ = now;
   }
 
   // 2. 发布实际路径

@@ -94,7 +94,8 @@ controller_server:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.3
-      yaw_goal_tolerance: 6.28
+      # 启用 FollowPath.goal_heading 时同步改为 0.15，避免 Nav2 在 yaw 未对准前提前结束。
+      yaw_goal_tolerance: 0.15  # 与 FollowPath.goal_heading.yaw_goal_tolerance 保持一致；越小朝向越严格，6.28 表示基本忽略朝向。
 
     FollowPath:
       plugin: "minco_controller::MincoMpcController"
@@ -131,6 +132,10 @@ controller_server:
       lidar_offset_x: 0.0
       lidar_offset_y: -0.20
       lidar_roll_offset: 0.1745
+      goal_heading:
+        enable: true  # true: MPC 使用底盘 IMU yaw 检查最终朝向；false: 恢复仅按 XY 位置停车。
+        yaw_goal_tolerance: 0.15
+        stall_timeout_sec: 1.5
 
       # Frame settings
       odom_frame: "camera_init"
@@ -170,7 +175,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 6.0
-        inflation_radius: 0.25
+        inflation_radius: 0.6
       stvl_layer:
         plugin: "spatio_temporal_voxel_layer/SpatioTemporalVoxelLayer"
         enabled: true
@@ -323,6 +328,11 @@ planner_server:
       odom_topic: /aft_mapped_to_init
       lidar_offset_x: 0.0
       lidar_offset_y: -0.20
+      goal_heading:
+        enable: true  # true: 接近目标后按 Goal 箭头方向规划 yaw；false: 车头继续跟随路径切向。
+        brake_trigger_dist: 1.0
+        blend_width: 0.5
+        yaw_goal_tolerance: 0.15
       performance:
         enable: false
         print_enable: false
@@ -549,7 +559,7 @@ planner_server:
         opt_freq: 20.0
         traj_goal_tolerance: 0.3
         enable_yaw_opt: true
-        safe_dist: 0.35
+        safe_dist: 0.5
         collision_dist: 0.2
         lookahead_dist: 6.0  # 前视距离,用于minco部分优化
         max_velocity: 3.0

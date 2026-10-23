@@ -21,7 +21,7 @@ merge_output_topic = 'livox/lidar'
 merge_frame_id = 'livox_frame'
 merge_max_interval_ms = 5.0
 # Previous extrinsic: [0.0, 0.4, 0.0, -0.35453, 0.0, 0.0]
-merge_extrinsic_back_to_front = [0.0, -0.25162, 0.25162, -1.57079633, 0.0, 0.0]
+merge_extrinsic_back_to_front = [0.0, 0.25162, -0.25162, -1.57079633, 0.0, 0.0]
 
 cur_path = os.path.split(os.path.realpath(__file__))[0] + '/'
 # However, if you want to keep the relative path logic from your example, 

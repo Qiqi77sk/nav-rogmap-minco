@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <iostream>
 
 #include "bt_manager/utils/log.hpp"
@@ -35,7 +36,11 @@ public:
     goal_.pose.header.frame_id = "map";
     goal_.pose.pose.position.x = nav_goal.x;
     goal_.pose.pose.position.y = nav_goal.y;
-    goal_.pose.pose.orientation.w = 1.0;
+    const double half_yaw = nav_goal.yaw * 0.5;
+    goal_.pose.pose.orientation.x = 0.0;
+    goal_.pose.pose.orientation.y = 0.0;
+    goal_.pose.pose.orientation.z = std::sin(half_yaw);
+    goal_.pose.pose.orientation.w = std::cos(half_yaw);
   }
 
   bool isGoalChanged(const Sentry_BT::Point2D & nav_goal) const
@@ -45,7 +50,9 @@ public:
     }
     const double dx = nav_goal.x - last_goal_.x;
     const double dy = nav_goal.y - last_goal_.y;
-    return std::hypot(dx, dy) > 0.01;  // 1cm threshold for action-goal update
+    const double dyaw =
+      std::atan2(std::sin(nav_goal.yaw - last_goal_.yaw), std::cos(nav_goal.yaw - last_goal_.yaw));
+    return std::hypot(dx, dy) > 0.01 || std::abs(dyaw) > 0.01;
   }
 
   bool selectNextPatrolGoalFromBlackboard(Sentry_BT::Point2D & next_goal)

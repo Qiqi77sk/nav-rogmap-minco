@@ -45,6 +45,14 @@ void MincoFsm::callMainFsmOnce()
   if (state_ != State::RECOVERING) {
     geometry_msgs::msg::PoseStamped new_goal;
     if (planner_->consumePendingGoal(new_goal)) {
+      const bool goal_changed =
+        !has_goal_ ||
+        std::hypot(
+          new_goal.pose.position.x - goal_.pose.position.x,
+          new_goal.pose.position.y - goal_.pose.position.y) > 0.01;
+      if (goal_changed) {
+        planner_->clearPlanVisualization();
+      }
       goal_ = new_goal;
       has_goal_ = true;
       recovery_server_->setMissionGoal(new_goal);

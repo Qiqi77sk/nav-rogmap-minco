@@ -3,6 +3,7 @@
 
 #include "minco_core/header.hpp"
 #include "minco_core/performance/planner_performance_monitor.hpp"
+#include "ros_interfaces/msg/sentry_info_offline.hpp"
 
 #include <limits>
 
@@ -50,6 +51,7 @@ public:
 
   // === Callbacks ===
   void safetyTimerCallback();
+  void onChassisInfo(const ros_interfaces::msg::SentryInfoOffline::SharedPtr msg);
 
   // === Utility & Helper Functions ===
   bool checkCollision();
@@ -64,9 +66,11 @@ public:
   bool getRobotPose(geometry_msgs::msg::PoseStamped & pose) const;
   bool checkGoalReached(const geometry_msgs::msg::PoseStamped & current_pose);
   bool consumePendingGoal(geometry_msgs::msg::PoseStamped & goal_out);
+  void clearPlanVisualization();
   void cancelGoal();
   Eigen::Vector3d getCurrentSpeed() const;
   double getCurrentYawFromOdom() const;
+  bool getFreshChassisYawCameraInit(double & yaw) const;
 
   // Query ESDF distance at the given position.
   double getEsdfDistance(const Eigen::Vector3d & pos) const;
@@ -119,7 +123,8 @@ private:
     traj_opt::Trajectory & out_yaw_traj,
     PlanningState state,
     const geometry_msgs::msg::Pose & current_pose,
-    double goal_yaw);
+    double goal_yaw,
+    bool free_goal);
 
   rcl_interfaces::msg::SetParametersResult onSetParameters(
     const std::vector<rclcpp::Parameter> & parameters);
@@ -142,6 +147,7 @@ private:
   rclcpp::Publisher<ros_interfaces::msg::MpcPositionCommand>::SharedPtr opt_path_pub_;
   rclcpp::Publisher<ros_interfaces::msg::MpcPositionCommand>::SharedPtr backup_path_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<ros_interfaces::msg::SentryInfoOffline>::SharedPtr chassis_info_sub_;
   rclcpp::TimerBase::SharedPtr fsm_timer_;
   rclcpp::TimerBase::SharedPtr safety_timer_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr on_set_parameters_callback_handle_;
@@ -174,6 +180,10 @@ private:
   double opt_freq_;
   double lookahead_dist_;
   double traj_goal_tolerance_{0.5};
+  bool goal_heading_enable_{false};
+  double goal_heading_brake_trigger_dist_{1.0};
+  double goal_heading_blend_width_{0.5};
+  double yaw_goal_tolerance_{0.15};
   MincoOptimizer::Config minco_config;
   RecoverServer::Config recovery_server_config_{};
   PlannerPerformanceMonitor planner_perf_monitor_;
@@ -200,6 +210,8 @@ private:
   geometry_utils::Trajectory last_yaw_traj_;
   std::vector<geometry_msgs::msg::PoseStamped> latest_global_path_;
   nav_msgs::msg::Odometry latest_odom_;
+  double latest_chassis_yaw_camerainit_{std::numeric_limits<double>::quiet_NaN()};
+  std::chrono::steady_clock::time_point latest_chassis_yaw_rx_{};
   geometry_msgs::msg::PoseStamped pending_goal_;
 
   bool has_last_traj_ = false;
@@ -212,6 +224,7 @@ private:
   std::mutex goal_mutex_;
   std::mutex perf_mutex_;
   mutable std::mutex odom_mutex_;
+  mutable std::mutex chassis_yaw_mutex_;
   mutable std::mutex mutex_;
 
   std::unique_ptr<Visualizer> visualizer_;

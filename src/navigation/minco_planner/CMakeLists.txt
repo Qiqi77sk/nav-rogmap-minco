@@ -24,6 +24,7 @@ find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(ros_interfaces REQUIRED)
 find_package(rog_map REQUIRED)
 find_package(yaml-cpp REQUIRED)
@@ -93,6 +94,7 @@ ament_target_dependencies(${library_name}
   rclcpp
   rclcpp_lifecycle
   tf2_ros
+  visualization_msgs
   ros_interfaces
   rog_map
 )
@@ -129,6 +131,7 @@ ament_export_dependencies(
   nav_msgs
   rclcpp
   rclcpp_lifecycle
+  visualization_msgs
   rcl_interfaces
   tf2_ros
   ros_interfaces

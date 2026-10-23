@@ -2,6 +2,7 @@
 #define MINCO_PLANNER__MINCO_PLANNER_VISUALIZER_HPP_
 
 #include "minco_core/header.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 namespace minco_planner {
 
@@ -14,6 +15,8 @@ public:
   void configure(const nav2_util::LifecycleNode::WeakPtr & parent, const std::string & global_frame);
 
   void cleanup();
+
+  void clearPlanVisualization();
 
   void update(const std::vector<Eigen::Vector3d> & control_points,
     const traj_opt::Trajectory & backup_traj,
@@ -56,6 +59,7 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr recover_path_vis_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr recover_goal_vis_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr control_points_vis_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr control_points_vis_array_pub_;
 
   rclcpp::TimerBase::SharedPtr visual_timer_;
 

@@ -10,3 +10,5 @@ float32 transform_state          # 变形状态，0-1，0%为未变形，100%为
 uint8 capacitor_capacity         # 电容容量百分比
 
 bool tunnel_yaw_aligned          # 底盘航向是否完成对齐
+float64 chassis_imu_yaw_deg      # STM32底盘IMU原始yaw角，单位deg
+float64 chassis_yaw_camerainit   # 底盘yaw在camera_init系下的角度，单位rad；delta_yaw未初始化时为NaN

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <chrono>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -19,6 +21,7 @@
 #include "tf2_ros/buffer.h"
 
 #include "ros_interfaces/msg/mpc_position_command.hpp"
+#include "ros_interfaces/msg/sentry_info_offline.hpp"
 
 #include "log.hpp"
 #include "minco_controller/mpc_solver.hpp"
@@ -57,6 +60,7 @@ private:
   // === Callbacks ===
   void onOptPath(const ros_interfaces::msg::MpcPositionCommand::SharedPtr msg);
   void onOdom(const nav_msgs::msg::Odometry::SharedPtr msg);
+  void onChassisInfo(const ros_interfaces::msg::SentryInfoOffline::SharedPtr msg);
 
   // === Utility & Helper Functions ===
   void configureMpcPerfLogging(const rclcpp_lifecycle::LifecycleNode::SharedPtr & node);
@@ -105,6 +109,7 @@ private:
   // === ROS 2 Interfaces (Publishers, Subscribers, Timers) ===
   rclcpp::Subscription<ros_interfaces::msg::MpcPositionCommand>::SharedPtr opt_path_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<ros_interfaces::msg::SentryInfoOffline>::SharedPtr chassis_info_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr mpc_predict_path_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr mpc_real_path_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_mpc_pub_;
@@ -125,12 +130,16 @@ private:
   // === State Variables & Caches ===
   // --- Visualization Cache ---
   std::vector<geometry_msgs::msg::PoseStamped> real_path_history_;
+  rclcpp::Time last_predict_path_pub_time_;
   rclcpp::Time last_real_path_pub_time_;
 
   // --- Runtime Data Cache ---
   mutable std::mutex data_mtx_;
+  mutable std::mutex chassis_yaw_mtx_;
   ros_interfaces::msg::MpcPositionCommand::SharedPtr latest_opt_path_;
   nav_msgs::msg::Odometry::SharedPtr latest_odom_;
+  double latest_chassis_yaw_camerainit_{std::numeric_limits<double>::quiet_NaN()};
+  std::chrono::steady_clock::time_point latest_chassis_yaw_rx_{};
 
   // --- Reference Tracking State ---
   // Track reference index over time when trajectory is not updated to avoid jumping back to start.
@@ -160,6 +169,12 @@ private:
   double lidar_offset_y_{0.0};
   double lidar_roll_offset_ = 0.0;
   bool use_small_gyro_mode_{true};
+  bool goal_heading_enable_{false};
+  double yaw_goal_tolerance_{0.15};
+  double heading_stall_timeout_sec_{1.5};
+  double heading_best_error_{std::numeric_limits<double>::infinity()};
+  std::chrono::steady_clock::time_point heading_progress_start_{};
+  bool heading_progress_active_{false};
   MpcPerformanceMonitor mpc_perf_monitor_;
   long long last_mpc_perf_stamp_ns_{0};
 
