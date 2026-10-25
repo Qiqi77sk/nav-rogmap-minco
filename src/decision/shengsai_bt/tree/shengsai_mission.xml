@@ -1,0 +1,45 @@
+<root main_tree_to_execute="ShengsaiMission">
+  <BehaviorTree ID="ShengsaiMission">
+    <Fallback name="MissionOutcome">
+      <Sequence name="StrictMissionSequence">
+        <SetSafeMode name="EnterSafeMode" />
+        <WaitForSystemReady
+          name="WaitForSystemReady"
+          timeout_s="{system_ready_timeout_s}"
+          offline_info_stale_s="{offline_info_stale_s}" />
+
+        <NavigateToGoal
+          name="GoToTarget"
+          goal_x="{target_x}"
+          goal_y="{target_y}"
+          goal_yaw="{target_yaw_rad}"
+          timeout_s="{navigation_timeout_s}"
+          max_retries="{navigation_retries}"
+          phase="GO_TO_TARGET" />
+
+        <WaitForTarget
+          name="WaitForTarget"
+          timeout_s="{target_wait_timeout_s}"
+          offline_info_stale_s="{offline_info_stale_s}" />
+
+        <EngageUntilTargetLost
+          name="EngageUntilTargetLost"
+          timeout_s="{engage_timeout_s}"
+          offline_info_stale_s="{offline_info_stale_s}" />
+
+        <NavigateToGoal
+          name="ReturnHome"
+          goal_x="{start_x}"
+          goal_y="{start_y}"
+          goal_yaw="{start_yaw_rad}"
+          timeout_s="{navigation_timeout_s}"
+          max_retries="{navigation_retries}"
+          phase="RETURN_HOME" />
+
+        <CompleteMission name="CompleteMission" />
+      </Sequence>
+
+      <FailAndHold name="FailAndHold" />
+    </Fallback>
+  </BehaviorTree>
+</root>

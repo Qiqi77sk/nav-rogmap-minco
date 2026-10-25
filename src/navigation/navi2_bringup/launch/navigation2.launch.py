@@ -18,7 +18,8 @@ def generate_launch_description():
         'use_sim_time', default='False')
     
     map_yaml_path = launch.substitutions.LaunchConfiguration(
-        'map', default=os.path.join(DreamChaser_dir, 'maps', '2026/rmuc2026.yaml'))
+        # 'map', default=os.path.join(DreamChaser_dir, 'maps', '2026/rmuc2026_prior11.yaml'))
+        'map', default=os.path.join(DreamChaser_dir, 'maps', '2026/shengsai2026.yaml'))
         # 'map', default=os.path.join(DreamChaser_dir, 'maps', '2026/rmul2026.yaml'))
         # 'map', default=os.path.join(DreamChaser_dir, 'maps', 'first_floor/first_floor.yaml'))
     nav2_param_path = launch.substitutions.LaunchConfiguration(

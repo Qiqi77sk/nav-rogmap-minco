@@ -3,6 +3,7 @@ gicp_relocalization_node:
     # General Configuration
     mode: "initial_guess" # Options: "multi_guess", "initial_guess"
     target_pcd_file: "src/perception/icp_relocalization/pcd/cloudlab_processed_blue.pcd"
+    # shengsai2026.pcd 尚未提供，暂保留原目标点云，避免加载不存在的文件。
     # target_pcd_file: "src/perception/icp_relocalization/pcd/cloudlab_processed_red.pcd"
     # target_pcd_file: "src/perception/Point-LIO/PCD/scans_1.pcd"
     map_frame: "map"
@@ -44,8 +45,10 @@ gicp_relocalization_node:
     # Static power-on relocation must remain near the supplied initial pose.
     initial_pose_guard:
       enable: true
-      max_translation_correction: 0.4  # meter, XY only
-      max_yaw_correction: 0.2         # rad
+      # max_translation_correction: 0.4  # 原值，旧 PCD 会把起点拉回黑区
+      max_translation_correction: 0.05  # meter, XY only
+      # max_yaw_correction: 0.2         # 原值
+      max_yaw_correction: 0.05         # rad
 
     # Switchable CSV output for real-vehicle threshold verification.
     results:
@@ -61,11 +64,17 @@ gicp_relocalization_node:
 
     timeout_seconds: 10.0  # 超时时间（秒）
     # default_pose_on_timeout: [5.0, 7.0, 0.0, 0.0, 0.0, 0.0]  # 超时后发布的默认位姿
-    default_pose_on_timeout: [4.234, 7.3, 0.0, 0.0, 0.0, 0.0]  # 超时后发布的默认位姿
+    # default_pose_on_timeout: [4.234, 7.3, 0.0, 0.0, 0.0, 0.0]  # 原默认位姿
+    # default_pose_on_timeout: [11.50, 5.10, 0.0, 0.0, 0.0, 3.141592653589793]  # 原 shengsai2026 红点
+    # default_pose_on_timeout: [11.48, 5.28, 0.0, 0.0, 0.0, 3.141592653589793]  # 未补偿杆臂
+    default_pose_on_timeout: [11.50, 5.48, 0.0, 0.0, 0.0, 3.141592653589793]  # 补偿 camera_init->base_link 杆臂
     # default_pose_on_timeout: [13.5, 4.8, 0.0, 0.0, 0.0, 3.14]  # 超时后发布的默认位姿
 
     # Initial Pose (x, y, z, roll, pitch, yaw) - Used if mode is "initial_guess"
-    initial_pose: [4.234, 7.3, 0.0, 0.0, 0.0, 0.04]
+    # initial_pose: [4.234, 7.3, 0.0, 0.0, 0.0, 0.04]  # 原初始位姿
+    # initial_pose: [11.50, 5.10, 0.0, 0.0, 0.0, 3.141592653589793]  # 原 shengsai2026 红点
+    # initial_pose: [11.48, 5.28, 0.0, 0.0, 0.0, 3.141592653589793]  # 未补偿杆臂
+    initial_pose: [11.50, 5.48, 0.0, 0.0, 0.0, 3.141592653589793]
     # initial_pose: [13.5, 4.8, 0.0, 0.0, 0.0, 3.14]
     # initial_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     # Multi-Guess Parameters

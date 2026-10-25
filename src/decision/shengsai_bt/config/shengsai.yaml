@@ -1,0 +1,19 @@
+shengsai_bt:
+  ros__parameters:
+    bt_tick_hz: 20.0
+    behavior_publish_hz: 10.0
+
+    start_x: 11.56
+    start_y: 5.26
+    start_yaw_rad: 3.141592653589793
+
+    target_x: 3.83
+    target_y: 3.44
+    target_yaw_rad: 3.141592653589793
+
+    system_ready_timeout_s: 60.0
+    offline_info_stale_s: 2.0
+    navigation_timeout_s: 120.0
+    navigation_retries: 2
+    target_wait_timeout_s: 60.0
+    engage_timeout_s: 180.0

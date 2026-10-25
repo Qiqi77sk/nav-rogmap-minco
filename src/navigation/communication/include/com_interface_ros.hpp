@@ -369,6 +369,18 @@ private:
       }
     }
 
+    // 底盘速度指令断流保护：/cmd_vel_mpc 超过 200ms 未更新则强制停车，
+    // 避免下位机持续收到最后一次残值。
+    {
+      std::lock_guard<std::mutex> lk(state_mutex_);
+      if (std::chrono::steady_clock::now() - last_chassis_cmd_time_ >
+        std::chrono::milliseconds(200)) {
+        vx_mps = 0.0f;
+        vy_mps = 0.0f;
+        vw_rpm = 0.0f;
+      }
+    }
+
     if (!delta_yaw_initialized) {
       vx_mps = 0.0f;
       vy_mps = 0.0f;
@@ -652,6 +664,7 @@ private:
   {
     std::lock_guard<std::mutex> lk(state_mutex_);
     cmd_vel_ = *velPtr;
+    last_chassis_cmd_time_ = std::chrono::steady_clock::now();
   }
 
   void sendCmdWrenchCB(const geometry_msgs::msg::WrenchStamped::ConstSharedPtr & wrenchPtr)
@@ -864,6 +877,7 @@ private:
 
   // State
   geometry_msgs::msg::Twist cmd_vel_;
+  std::chrono::steady_clock::time_point last_chassis_cmd_time_{std::chrono::steady_clock::now()};
   geometry_msgs::msg::Wrench cmd_wrench_;
   nav_msgs::msg::Odometry odom_;
   std::chrono::steady_clock::time_point send_enable_time_{std::chrono::steady_clock::now()};
