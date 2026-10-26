@@ -966,7 +966,9 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
     vx = 0.0;
     vy = 0.0;
   }
-  constexpr double goal_pos_threshold = 0.10;
+  // 到达判定距离 20 cm（原 10 cm），与 general_goal_checker.xy_goal_tolerance 保持一致。
+  // constexpr double goal_pos_threshold = 0.10;
+  constexpr double goal_pos_threshold = 0.20;
   bool stop_mpc_cmd = false;
   bool near_goal_for_heading = false;
   double heading_error_abs = std::numeric_limits<double>::infinity();

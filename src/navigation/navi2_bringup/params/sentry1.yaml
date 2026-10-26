@@ -5,8 +5,8 @@ bt_navigator:
     robot_base_frame: "base_link"
     odom_topic: /aft_mapped_to_init
     bt_loop_duration: 20 # ms
-    # 行为树超时时间，秒
-    default_server_timeout: 20
+    # 行为树 action server 确认超时，毫秒
+    default_server_timeout: 500
     # 毫秒
     wait_for_service_timeout: 2000
     # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
@@ -96,7 +96,8 @@ controller_server:
       # 修掉 controller_server 直接跨坐标系比较导致的 0.3 m 误判到达。
       plugin: "minco_controller::FrameAwareSimpleGoalChecker"
       goal_frame: "map"
-      xy_goal_tolerance: 0.10
+      # xy_goal_tolerance: 0.10
+      xy_goal_tolerance: 0.20
       # 启用 FollowPath.goal_heading 时同步改为 0.15，避免 Nav2 在 yaw 未对准前提前结束。
       yaw_goal_tolerance: 0.15  # 与 FollowPath.goal_heading.yaw_goal_tolerance 保持一致；越小朝向越严格，6.28 表示基本忽略朝向。
 
@@ -170,7 +171,9 @@ local_costmap:
       height: 5
       resolution: 0.05
       # robot_radius: 0.22
-      robot_radius: 0.2
+      # robot_radius: 0.2
+      # robot_radius: 0.3
+      robot_radius: 0.25
       plugins: ["static_layer", "stvl_layer", "inflation_layer"]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
@@ -231,7 +234,9 @@ global_costmap:
       robot_base_frame: base_link
       use_sim_time: False
       # robot_radius: 0.22
-      robot_radius: 0.20
+      # robot_radius: 0.20
+      # robot_radius: 0.3
+      robot_radius: 0.25
       resolution: 0.05
       track_unknown_space: true
       # 全局代价地图只保留静态地图+膨胀；动态障碍由 local_costmap 的 STVL
@@ -328,7 +333,8 @@ planner_server:
         boundary_sample_step: 0.1
         unknown_as_occupied: true
         prefer_goal_direction: true
-      tolerance: 0.3  
+      # 起点进入该容差就立即结束搜索；0.3 会让 0.3 m 内只回溯出 1 个点而被判失败。
+      tolerance: 0.01
       use_smac: true
       allow_unknown: false
       odom_topic: /aft_mapped_to_init
@@ -553,6 +559,8 @@ planner_server:
           rate: 10.0
           range: [10.0, 10.0, 1.5]
       corridor:
+        # robot_radius: 0.25
+        # robot_radius: 0.3
         robot_radius: 0.25
         extra_margin: 0.05
 
@@ -570,10 +578,12 @@ planner_server:
         traj_goal_tolerance: 0.20
         enable_yaw_opt: true
         # safe_dist 0.5 在 0.8 m 区域/0.9 m 通道里不可行，优化器会切角；
-        # 降到 0.3（仍大于 collision_dist=0.2）。
+        # 车体半径 0.25 m，collision_dist=0.25，safe_dist=0.3 保留 0.05 m 软余量。
         # safe_dist: 0.5
         safe_dist: 0.3
-        collision_dist: 0.2
+        # collision_dist: 0.2
+        # collision_dist: 0.3
+        collision_dist: 0.25
         lookahead_dist: 6.0  # 前视距离,用于minco部分优化
         max_velocity: 3.0
         max_acceleration: 2.0

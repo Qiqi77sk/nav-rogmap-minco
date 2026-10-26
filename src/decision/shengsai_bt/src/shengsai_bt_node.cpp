@@ -139,7 +139,7 @@ void ShengsaiBtNode::setSafeMode(const std::string & phase)
   setPhase(phase);
 }
 
-void ShengsaiBtNode::setCombatMode()
+void ShengsaiBtNode::setCombatMode(const std::string & phase)
 {
   if (target_finished_.load()) {
     setSafeMode("TARGET_FINISHED");
@@ -147,7 +147,7 @@ void ShengsaiBtNode::setCombatMode()
   }
   combat_active_.store(true);
   aim_allowed_.store(true);
-  setPhase("ENGAGE");
+  setPhase(phase);
 }
 
 void ShengsaiBtNode::finishCombatAndLatch()

@@ -59,8 +59,8 @@ SDK 回调按设备 IP 接收两台 MID-360 数据，保留逐雷达点云/IMU t
 | 设备 | IP |
 |---|---|
 | 主机网卡 | `192.168.1.47` |
-| 前雷达 | `192.168.1.135` |
-| 后雷达 | `192.168.1.122` |
+| 主/右雷达（驱动 `front`） | `192.168.1.135` |
+| 副/左雷达（驱动 `back`） | `192.168.1.122` |
 
 JSON 中还配置主机接收端口（点云、IMU、命令、日志等）。换车或换网卡时，至少同步检查：
 
@@ -90,8 +90,8 @@ ping 192.168.1.122
 | `publish_freq` | `20.0` | 驱动发布频率 |
 | `frame_id` | `livox_frame` | 原始点云 frame |
 | `enable_internal_lidar_merge` | `true` | 开启驱动内双雷达融合 |
-| `merge_front_ip` | `192.168.1.135` | 前雷达选择 |
-| `merge_back_ip` | `192.168.1.122` | 后雷达选择 |
+| `merge_front_ip` | `192.168.1.135` | 主/右雷达选择（`front`） |
+| `merge_back_ip` | `192.168.1.122` | 副/左雷达选择（`back`） |
 | `merge_output_topic` | `livox/lidar` | Point-LIO 主输入 |
 | `merge_max_interval_ms` | `5.0` | 两雷达帧允许的最大时间差 |
 

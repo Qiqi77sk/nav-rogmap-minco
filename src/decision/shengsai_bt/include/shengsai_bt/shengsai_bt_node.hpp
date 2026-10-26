@@ -33,7 +33,7 @@ public:
 
   void populateBlackboard(BT::Blackboard & blackboard) const;
   void setSafeMode(const std::string & phase);
-  void setCombatMode();
+  void setCombatMode(const std::string & phase);
   void finishCombatAndLatch();
   void markMissionComplete();
   void reportFailure(const std::string & reason);

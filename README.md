@@ -127,7 +127,7 @@ flowchart LR
 
 ### ⚡ 1. 双雷达驱动侧融合与进程内传输
 
-- `livox_ros_driver2` 在驱动侧按雷达 IP 区分前后雷达，通过 `merge_extrinsic_back_to_front` 将后雷达点变换到前雷达坐标系并做时间窗口融合。
+- `livox_ros_driver2` 在驱动侧按雷达 IP 区分主/副雷达（驱动参数名为 front/back），通过 `merge_extrinsic_back_to_front` 将副（back，物理左侧）雷达点变换到主（front，物理右侧）雷达坐标系并做时间窗口融合。
 - Livox driver 与 Point-LIO 运行在同一 `component_container_mt`，开启 `use_intra_process_comms`；Point-LIO 使用 `UniquePtr` 接收点云，稠密点云也以 `std::unique_ptr` 移交发布，减少大消息复制与跨进程序列化。
 - 支持单 MID-360 和双 MID-360 两套 launch；比赛默认使用双雷达入口。
 
@@ -316,8 +316,8 @@ MEM_LIMIT_GB=24 MEM_PER_WORKER_GB=2 ./build.bash
 # mixed_MID360_config.json
 host_net_info: 192.168.1.47       # NUC 有线网卡地址
 lidar_configs:
-  - 192.168.1.122                 # 后雷达
-  - 192.168.1.135                 # 前雷达 / IMU 来源
+  - 192.168.1.122                 # 副/左雷达（驱动 back）
+  - 192.168.1.135                 # 主/右雷达（驱动 front）/ IMU 来源
 
 # mixed_MID360_component.yaml
 enable_internal_lidar_merge: true
@@ -333,7 +333,7 @@ merge_extrinsic_back_to_front: [0.0, 0.25162, -0.25162, -1.57079633, 0.0, 0.0]
 
 1. 将 NUC 网卡设置为与雷达同网段的静态地址，并同步修改 JSON 中所有 `host_net_info.*_ip`。
 2. `lidar_configs[].ip` 必须与雷达实际 IP 一致；`merge_front_ip`、`merge_back_ip` 必须引用其中两台雷达。
-3. `merge_extrinsic_back_to_front` 表示“后雷达坐标系 → 前雷达坐标系”的刚体外参，数组的具体顺序以驱动实现和当前配置注释为准，重新安装雷达后必须实测标定，不能只修改 IP。
+3. `merge_extrinsic_back_to_front` 表示“副（back，物理左侧）雷达坐标系 → 主（front，物理右侧）雷达坐标系”的刚体外参，数组的具体顺序以驱动实现和当前配置注释为准，重新安装雷达后必须实测标定，不能只修改 IP。
 4. Point-LIO 当前订阅 `livox/imu_192_168_1_135`。若更换主雷达 IP，应同步修改 launch 的 `pointlio_imu_topic` 和 `mid360.yaml` 的 `common.imu_topic`。
 
 可先单独检查雷达：

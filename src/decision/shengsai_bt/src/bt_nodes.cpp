@@ -301,7 +301,9 @@ BT::NodeStatus WaitForTarget::onStart()
   timeout_s_ = getInput<double>("timeout_s").value_or(60.0);
   offline_stale_s_ = getInput<double>("offline_info_stale_s").value_or(2.0);
   start_time_ = std::chrono::steady_clock::now();
-  node_.setSafeMode("WAIT_TARGET");
+  // 到达终点后立即允许下位机自瞄，再等待视觉确认 is_get=true。
+  node_.setCombatMode("WAIT_TARGET");
+  RCLCPP_INFO(node_.get_logger(), "Reached target: not_aim_enemy=false. Waiting for is_get=true.");
   return onRunning();
 }
 
@@ -341,9 +343,9 @@ BT::NodeStatus EngageUntilTargetLost::onStart()
   timeout_s_ = getInput<double>("timeout_s").value_or(180.0);
   offline_stale_s_ = getInput<double>("offline_info_stale_s").value_or(2.0);
   start_time_ = std::chrono::steady_clock::now();
-  node_.setCombatMode();
+  node_.setCombatMode("ENGAGE");
   if (!node_.hasTargetFinished()) {
-    RCLCPP_INFO(node_.get_logger(), "Auto aim enabled: not_aim_enemy=false.");
+    RCLCPP_INFO(node_.get_logger(), "Engagement active: waiting for is_get=false.");
   }
   return onRunning();
 }

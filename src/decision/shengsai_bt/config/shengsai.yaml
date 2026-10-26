@@ -15,7 +15,7 @@ shengsai_bt:
     target_y: 0.40
     target_yaw_rad: 3.141592653589793
 
-    system_ready_timeout_s: 60.0
+    system_ready_timeout_s: 120.0
     offline_info_stale_s: 2.0
     navigation_timeout_s: 120.0
     navigation_retries: 2
