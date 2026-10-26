@@ -966,7 +966,7 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
     vx = 0.0;
     vy = 0.0;
   }
-  constexpr double goal_pos_threshold = 0.3;
+  constexpr double goal_pos_threshold = 0.10;
   bool stop_mpc_cmd = false;
   bool near_goal_for_heading = false;
   double heading_error_abs = std::numeric_limits<double>::infinity();

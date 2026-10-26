@@ -3,12 +3,16 @@ shengsai_bt:
     bt_tick_hz: 20.0
     behavior_publish_hz: 10.0
 
-    start_x: 11.56
-    start_y: 5.26
+    # start_x: 11.56
+    # start_y: 5.26
+    start_x: 8.25
+    start_y: 2.15
     start_yaw_rad: 3.141592653589793
 
-    target_x: 3.83
-    target_y: 3.44
+    # target_x: 3.83
+    # target_y: 3.44
+    target_x: 0.40
+    target_y: 0.40
     target_yaw_rad: 3.141592653589793
 
     system_ready_timeout_s: 60.0

@@ -67,14 +67,16 @@ gicp_relocalization_node:
     # default_pose_on_timeout: [4.234, 7.3, 0.0, 0.0, 0.0, 0.0]  # 原默认位姿
     # default_pose_on_timeout: [11.50, 5.10, 0.0, 0.0, 0.0, 3.141592653589793]  # 原 shengsai2026 红点
     # default_pose_on_timeout: [11.48, 5.28, 0.0, 0.0, 0.0, 3.141592653589793]  # 未补偿杆臂
-    default_pose_on_timeout: [11.50, 5.48, 0.0, 0.0, 0.0, 3.141592653589793]  # 补偿 camera_init->base_link 杆臂
+    # default_pose_on_timeout: [11.50, 5.48, 0.0, 0.0, 0.0, 3.141592653589793]  # 补偿 camera_init->base_link 杆臂
+    default_pose_on_timeout: [8.25, 2.35, 0.0, 0.0, 0.0, 3.141592653589793]  # shengsai_better 启动区中心 x=8.25,y=2.15，补偿 camera_init->base_link 杆臂
     # default_pose_on_timeout: [13.5, 4.8, 0.0, 0.0, 0.0, 3.14]  # 超时后发布的默认位姿
 
     # Initial Pose (x, y, z, roll, pitch, yaw) - Used if mode is "initial_guess"
     # initial_pose: [4.234, 7.3, 0.0, 0.0, 0.0, 0.04]  # 原初始位姿
     # initial_pose: [11.50, 5.10, 0.0, 0.0, 0.0, 3.141592653589793]  # 原 shengsai2026 红点
     # initial_pose: [11.48, 5.28, 0.0, 0.0, 0.0, 3.141592653589793]  # 未补偿杆臂
-    initial_pose: [11.50, 5.48, 0.0, 0.0, 0.0, 3.141592653589793]
+    # initial_pose: [11.50, 5.48, 0.0, 0.0, 0.0, 3.141592653589793]
+    initial_pose: [8.25, 2.35, 0.0, 0.0, 0.0, 3.141592653589793]  # shengsai_better 启动区中心 x=8.25,y=2.15，补偿 camera_init->base_link 杆臂
     # initial_pose: [13.5, 4.8, 0.0, 0.0, 0.0, 3.14]
     # initial_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     # Multi-Guess Parameters

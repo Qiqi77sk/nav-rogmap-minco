@@ -19,7 +19,8 @@ def generate_launch_description():
     
     map_yaml_path = launch.substitutions.LaunchConfiguration(
         # 'map', default=os.path.join(DreamChaser_dir, 'maps', '2026/rmuc2026_prior11.yaml'))
-        'map', default=os.path.join(DreamChaser_dir, 'maps', '2026/shengsai2026.yaml'))
+        # 'map', default=os.path.join(DreamChaser_dir, 'maps', '2026/shengsai2026.yaml'))
+        'map', default=os.path.join(DreamChaser_dir, 'maps', '2026/shengsai_better.yaml'))
         # 'map', default=os.path.join(DreamChaser_dir, 'maps', '2026/rmul2026.yaml'))
         # 'map', default=os.path.join(DreamChaser_dir, 'maps', 'first_floor/first_floor.yaml'))
     nav2_param_path = launch.substitutions.LaunchConfiguration(
@@ -85,7 +86,10 @@ def generate_launch_description():
                 'use_sim_time': use_sim_time,
                 'params_file': nav2_param_path,
                 'log_level': 'info',
-                'planner_container_name': 'livox_pointlio_container'}.items(),
+                'planner_container_name': 'livox_pointlio_container',
+                # 独立启动 planner_server，使其子节点 global_costmap 能收到
+                # sentry1.yaml 里的 robot_radius/inflation/stvl 参数
+                'planner_standalone': 'True'}.items(),
         ),       
         launch.actions.IncludeLaunchDescription(
             PythonLaunchDescriptionSource(

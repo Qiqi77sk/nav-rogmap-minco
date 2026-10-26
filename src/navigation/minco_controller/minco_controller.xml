@@ -5,5 +5,10 @@
         基于 qpOASES 的 Minco MPC 控制器
       </description>
     </class>
+    <class type="minco_controller::FrameAwareSimpleGoalChecker" base_class_type="nav2_core::GoalChecker">
+      <description>
+        坐标系感知的 SimpleGoalChecker：比较前把 map 系目标转换到 local costmap 系
+      </description>
+    </class>
   </library>
 </class_libraries>

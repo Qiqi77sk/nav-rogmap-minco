@@ -92,8 +92,11 @@ controller_server:
       movement_time_allowance: 1000.0
     general_goal_checker:
       stateful: True
-      plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.3
+      # 比较前把 map 系目标转换到 local costmap 系（camera_init），
+      # 修掉 controller_server 直接跨坐标系比较导致的 0.3 m 误判到达。
+      plugin: "minco_controller::FrameAwareSimpleGoalChecker"
+      goal_frame: "map"
+      xy_goal_tolerance: 0.10
       # 启用 FollowPath.goal_heading 时同步改为 0.15，避免 Nav2 在 yaw 未对准前提前结束。
       yaw_goal_tolerance: 0.15  # 与 FollowPath.goal_heading.yaw_goal_tolerance 保持一致；越小朝向越严格，6.28 表示基本忽略朝向。
 
@@ -231,8 +234,11 @@ global_costmap:
       robot_radius: 0.20
       resolution: 0.05
       track_unknown_space: true
-      plugins: ["static_layer", "stvl_layer", "inflation_layer"]
-      # plugins: ["static_layer", "inflation_layer"]
+      # 全局代价地图只保留静态地图+膨胀；动态障碍由 local_costmap 的 STVL
+      # 和 MincoPlanner 自带的 ROGMap dynamic query 处理。全局 STVL 在
+      # 0.8 m 启动区/狭窄通道里会把 SMAC2D 的出口堵死。
+      # plugins: ["static_layer", "stvl_layer", "inflation_layer"]
+      plugins: ["static_layer", "inflation_layer"]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -436,7 +442,8 @@ planner_server:
           prior_map:
             enable: true
             # yaml_path: "src/navigation/navi2_bringup/maps/2026/rmuc2026_prior.yaml"
-            yaml_path: "src/navigation/navi2_bringup/maps/2026/shengsai2026.yaml"
+            # yaml_path: "src/navigation/navi2_bringup/maps/2026/shengsai2026.yaml"
+            yaml_path: "src/navigation/navi2_bringup/maps/2026/shengsai_better.yaml"
             # 留空时使用 YAML 的 image 字段，并相对 YAML 所在目录解析。
             pgm_path: ""
             frame_id: map
@@ -557,9 +564,15 @@ planner_server:
 
       minco_optimizer:
         opt_freq: 20.0
-        traj_goal_tolerance: 0.3
+        # 10 cm 停车由 goal checker / goal_pos_threshold 负责；
+        # 这里放宽到 0.20，避免局部轨迹终点校验太严导致 OPTIMIZER_FAILED。
+        # traj_goal_tolerance: 0.10
+        traj_goal_tolerance: 0.20
         enable_yaw_opt: true
-        safe_dist: 0.5
+        # safe_dist 0.5 在 0.8 m 区域/0.9 m 通道里不可行，优化器会切角；
+        # 降到 0.3（仍大于 collision_dist=0.2）。
+        # safe_dist: 0.5
+        safe_dist: 0.3
         collision_dist: 0.2
         lookahead_dist: 6.0  # 前视距离,用于minco部分优化
         max_velocity: 3.0
