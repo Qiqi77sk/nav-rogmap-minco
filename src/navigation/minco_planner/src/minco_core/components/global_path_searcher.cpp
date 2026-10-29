@@ -637,6 +637,38 @@ bool GlobalPathSearcher::makePlanOnQuery(const geometry_msgs::msg::Pose & start,
     bool smac_success = smac_->createPath(mx_start, my_start, mx_goal, my_goal, smac_path, cancel_checker);
 
     if (!smac_success || smac_path.size() < 2) {
+      // A goal inside the robot's current cell cannot produce a two-pose SMAC
+      // path. Return a direct start->goal path instead so the controller and
+      // goal checker can finish the final position/yaw alignment.
+      if (mx_start == mx_goal && my_start == my_goal) {
+        if (cancel_checker && cancel_checker()) {
+          return false;
+        }
+        RCLCPP_WARN(logger_,
+          "SMAC 2D: start and goal are in the same cell (%u,%u); "
+          "using direct start->goal fallback path.",
+          mx_start,
+          my_start);
+
+        latest_global_path.clear();
+        latest_global_path.reserve(2U);
+        plan.poses.clear();
+        plan.poses.reserve(2U);
+
+        geometry_msgs::msg::PoseStamped start_pose;
+        start_pose.header = plan.header;
+        start_pose.pose = start;
+        latest_global_path.push_back(start_pose);
+        plan.poses.push_back(start_pose);
+
+        geometry_msgs::msg::PoseStamped goal_pose;
+        goal_pose.header = plan.header;
+        goal_pose.pose = goal;
+        latest_global_path.push_back(goal_pose);
+        plan.poses.push_back(goal_pose);
+        return true;
+      }
+
       RCLCPP_ERROR(logger_,
         "SMAC 2D: Failed to find path (success=%s, path_size=%zu). See endpoint diagnostics below.",
         smac_success ? "true" : "false",

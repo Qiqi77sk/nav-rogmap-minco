@@ -39,6 +39,13 @@ public:
   void reportFailure(const std::string & reason);
   void requestStop();
 
+  void publishChassisZero();
+  void setZeroHold(bool active);
+  void beginAttackTracking();
+  void endAttackTracking();
+  bool attackStarted() const;
+  bool attackFinished() const;
+
 private:
   void offlineInfoCallback(const ros_interfaces::msg::SentryInfoOffline::SharedPtr msg);
   void publishBehavior();
@@ -49,6 +56,7 @@ private:
   rclcpp::Subscription<ros_interfaces::msg::SentryInfoOffline>::SharedPtr offline_info_sub_;
   rclcpp::Publisher<ros_interfaces::msg::Behavior>::SharedPtr behavior_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_mpc_pub_;
   rclcpp::TimerBase::SharedPtr behavior_timer_;
 
   std::atomic<bool> aim_allowed_{false};
@@ -56,11 +64,15 @@ private:
   std::atomic<bool> target_finished_{false};
   std::atomic<bool> stop_requested_{false};
   std::atomic<bool> failure_reported_{false};
+  std::atomic<bool> zero_hold_active_{false};
 
   mutable std::mutex offline_info_mutex_;
   bool has_offline_info_{false};
   bool is_get_{false};
   bool target_tracking_armed_{false};
+  bool attack_phase_active_{false};
+  bool attack_started_{false};
+  bool attack_finished_{false};
   std::chrono::steady_clock::time_point last_offline_info_time_{};
 
   mutable std::mutex phase_mutex_;

@@ -25,6 +25,11 @@ ShengsaiBtNode & nodeFromConfig(const BT::NodeConfiguration & config)
   }
   return *typed_node;
 }
+
+double yawFromQuaternion(const geometry_msgs::msg::Quaternion & q)
+{
+  return std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+}
 }  // namespace
 
 SetSafeMode::SetSafeMode(const std::string & name, const BT::NodeConfiguration & config)
@@ -97,6 +102,23 @@ BT::PortsList NavigateToGoal::providedPorts()
     BT::InputPort<double>("timeout_s", 120.0, "Timeout for one navigation attempt"),
     BT::InputPort<int>("max_retries", 2, "Retries after the initial navigation attempt"),
     BT::InputPort<std::string>("phase", "GO_TO_TARGET", "Mission phase name for logging"),
+    BT::InputPort<bool>("require_system_ready",
+      false,
+      "Wait for Nav2 and fresh offline info before the first navigation attempt"),
+    BT::InputPort<double>(
+      "system_ready_timeout_s", 120.0, "Maximum time to wait for Nav2 and offline info"),
+    BT::InputPort<double>(
+      "offline_info_stale_s", 2.0, "Maximum accepted offline-info age for the readiness check"),
+    BT::InputPort<double>("arrival_xy_tolerance",
+      0.20,
+      "Fallback arrival xy tolerance when the navigation action ends near the goal"),
+    BT::InputPort<double>("arrival_yaw_tolerance",
+      0.15,
+      "Fallback arrival yaw tolerance when the navigation action ends near the goal"),
+    BT::InputPort<double>("feedback_stale_s", 2.0, "Maximum feedback age for the fallback arrival check"),
+    BT::InputPort<double>("arrival_dwell_s",
+      0.5,
+      "Feedback must stay within the arrival tolerance this long before canceling an active goal"),
   };
 }
 
@@ -116,8 +138,23 @@ BT::NodeStatus NavigateToGoal::onStart()
   timeout_s_ = getInput<double>("timeout_s").value_or(120.0);
   max_retries_ = std::max(0, getInput<int>("max_retries").value_or(2));
   phase_ = getInput<std::string>("phase").value_or("NAVIGATING");
+  require_system_ready_ = getInput<bool>("require_system_ready").value_or(false);
+  system_ready_timeout_s_ = getInput<double>("system_ready_timeout_s").value_or(120.0);
+  offline_stale_s_ = getInput<double>("offline_info_stale_s").value_or(2.0);
+  arrival_xy_tolerance_ = getInput<double>("arrival_xy_tolerance").value_or(0.20);
+  arrival_yaw_tolerance_ = getInput<double>("arrival_yaw_tolerance").value_or(0.15);
+  feedback_stale_s_ = getInput<double>("feedback_stale_s").value_or(2.0);
+  arrival_dwell_s_ = getInput<double>("arrival_dwell_s").value_or(0.5);
   attempt_count_ = 0;
-  node_.setSafeMode(phase_);
+  node_.setSafeMode(require_system_ready_ ? "WAIT_SYSTEM_READY" : phase_);
+  node_.setZeroHold(false);
+
+  if (require_system_ready_) {
+    attempt_state_ = AttemptState::WAIT_SYSTEM_READY;
+    system_ready_start_time_ = std::chrono::steady_clock::now();
+    return onRunning();
+  }
+
   startAttempt();
   return onRunning();
 }
@@ -126,6 +163,10 @@ void NavigateToGoal::startAttempt()
 {
   ++attempt_count_;
   cancel_sent_ = false;
+  resetFeedback();
+  resetNearGoalDwell();
+  node_.setSafeMode(phase_);
+  node_.setZeroHold(false);
   goal_handle_.reset();
   goal_handle_future_ = {};
   result_future_ = {};
@@ -151,6 +192,20 @@ BT::NodeStatus NavigateToGoal::onRunning()
   }
 
   switch (attempt_state_) {
+  case AttemptState::WAIT_SYSTEM_READY: {
+    if (node_.isNavigationServerReady() && node_.hasFreshOfflineInfo(offline_stale_s_)) {
+      RCLCPP_INFO(node_.get_logger(), "Navigation action server and offline info are ready.");
+      startAttempt();
+      return onRunning();
+    }
+    if (system_ready_timeout_s_ > 0.0 &&
+        elapsedSeconds(system_ready_start_time_) >= system_ready_timeout_s_) {
+      node_.reportFailure("system ready timeout");
+      return BT::NodeStatus::FAILURE;
+    }
+    return BT::NodeStatus::RUNNING;
+  }
+
   case AttemptState::SEND_GOAL: {
     if (attemptTimedOut()) {
       return handleAttemptFailure("navigation action server unavailable");
@@ -170,7 +225,13 @@ BT::NodeStatus NavigateToGoal::onRunning()
     goal.pose.pose.orientation.z = std::sin(half_yaw);
     goal.pose.pose.orientation.w = std::cos(half_yaw);
 
-    goal_handle_future_ = client->async_send_goal(goal);
+    rclcpp_action::Client<ShengsaiBtNode::NavigateToPose>::SendGoalOptions options;
+    options.feedback_callback =
+      [this](GoalHandle::SharedPtr,
+        const std::shared_ptr<const ShengsaiBtNode::NavigateToPose::Feedback> feedback) {
+        feedbackCallback(feedback);
+      };
+    goal_handle_future_ = client->async_send_goal(goal, options);
     attempt_state_ = AttemptState::WAIT_GOAL_HANDLE;
     return BT::NodeStatus::RUNNING;
   }
@@ -204,6 +265,9 @@ BT::NodeStatus NavigateToGoal::onRunning()
       try {
         const auto & result = result_future_.get();
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
+          // Stop the chassis immediately on arrival and keep /cmd_vel_mpc at zero
+          // until the next navigation attempt explicitly releases the hold.
+          node_.setZeroHold(true);
           RCLCPP_INFO(node_.get_logger(), "%s navigation reached the goal.", phase_.c_str());
           return BT::NodeStatus::SUCCESS;
         }
@@ -213,6 +277,33 @@ BT::NodeStatus NavigateToGoal::onRunning()
       } catch (const std::exception & error) {
         return handleAttemptFailure(std::string("result exception: ") + error.what());
       }
+    }
+
+    double feedback_distance = 0.0;
+    double feedback_yaw_error = 0.0;
+    if (feedbackNearGoal(feedback_distance, feedback_yaw_error)) {
+      if (!near_goal_dwell_active_) {
+        near_goal_dwell_active_ = true;
+        near_goal_dwell_start_time_ = std::chrono::steady_clock::now();
+      } else if (arrival_dwell_s_ <= 0.0 ||
+                 elapsedSeconds(near_goal_dwell_start_time_) >= arrival_dwell_s_) {
+        RCLCPP_WARN(node_.get_logger(),
+          "%s feedback pose is within arrival tolerance while navigation is still running "
+          "(dist=%.3f m, yaw_err=%.3f rad); canceling goal and treating as arrival.",
+          phase_.c_str(),
+          feedback_distance,
+          feedback_yaw_error);
+        cancelCurrentGoal();
+        node_.setZeroHold(true);
+        goal_handle_.reset();
+        goal_handle_future_ = {};
+        result_future_ = {};
+        cancel_sent_ = false;
+        resetNearGoalDwell();
+        return BT::NodeStatus::SUCCESS;
+      }
+    } else {
+      resetNearGoalDwell();
     }
 
     if (attemptTimedOut()) {
@@ -249,10 +340,24 @@ BT::NodeStatus NavigateToGoal::handleAttemptFailure(const std::string & reason)
     attempt_count_,
     reason.c_str());
 
+  node_.setZeroHold(true);
   goal_handle_.reset();
   goal_handle_future_ = {};
   result_future_ = {};
   cancel_sent_ = false;
+
+  double feedback_distance = 0.0;
+  double feedback_yaw_error = 0.0;
+  if (feedbackNearGoal(feedback_distance, feedback_yaw_error)) {
+    RCLCPP_WARN(node_.get_logger(),
+      "%s navigation failed (%s), but feedback pose is within arrival tolerance "
+      "(dist=%.3f m, yaw_err=%.3f rad); treating as arrival.",
+      phase_.c_str(),
+      reason.c_str(),
+      feedback_distance,
+      feedback_yaw_error);
+    return BT::NodeStatus::SUCCESS;
+  }
 
   if (attempt_count_ <= max_retries_) {
     attempt_state_ = AttemptState::WAIT_RETRY;
@@ -262,6 +367,55 @@ BT::NodeStatus NavigateToGoal::handleAttemptFailure(const std::string & reason)
 
   node_.reportFailure(phase_ + " navigation failed after all attempts");
   return BT::NodeStatus::FAILURE;
+}
+
+void NavigateToGoal::feedbackCallback(
+  const std::shared_ptr<const ShengsaiBtNode::NavigateToPose::Feedback> & feedback)
+{
+  if (!feedback) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(feedback_mutex_);
+  last_feedback_pose_ = feedback->current_pose;
+  last_feedback_time_ = std::chrono::steady_clock::now();
+  has_feedback_ = true;
+}
+
+bool NavigateToGoal::feedbackNearGoal(double & distance, double & yaw_error) const
+{
+  std::lock_guard<std::mutex> lock(feedback_mutex_);
+  if (!has_feedback_) {
+    return false;
+  }
+  if (feedback_stale_s_ > 0.0 && elapsedSeconds(last_feedback_time_) > feedback_stale_s_) {
+    return false;
+  }
+
+  const auto & pose = last_feedback_pose_;
+  // Nav2 NavigateToPose feedback is in the global frame. Only accept the
+  // fallback when the frame is map or unspecified.
+  if (!pose.header.frame_id.empty() && pose.header.frame_id != "map") {
+    return false;
+  }
+
+  distance = std::hypot(pose.pose.position.x - goal_x_, pose.pose.position.y - goal_y_);
+  const double feedback_yaw = yawFromQuaternion(pose.pose.orientation);
+  yaw_error = std::atan2(std::sin(goal_yaw_ - feedback_yaw), std::cos(goal_yaw_ - feedback_yaw));
+  return distance <= arrival_xy_tolerance_ && std::abs(yaw_error) <= arrival_yaw_tolerance_;
+}
+
+void NavigateToGoal::resetFeedback()
+{
+  std::lock_guard<std::mutex> lock(feedback_mutex_);
+  has_feedback_ = false;
+  last_feedback_pose_ = geometry_msgs::msg::PoseStamped();
+  last_feedback_time_ = std::chrono::steady_clock::time_point{};
+}
+
+void NavigateToGoal::resetNearGoalDwell()
+{
+  near_goal_dwell_active_ = false;
+  near_goal_dwell_start_time_ = std::chrono::steady_clock::time_point{};
 }
 
 void NavigateToGoal::cancelCurrentGoal()
@@ -281,6 +435,93 @@ void NavigateToGoal::onHalted()
 {
   cancelCurrentGoal();
   node_.requestStop();
+}
+
+EngageAtTarget::EngageAtTarget(const std::string & name, const BT::NodeConfiguration & config)
+: BT::StatefulActionNode(name, config), node_(nodeFromConfig(config))
+{
+}
+
+BT::PortsList EngageAtTarget::providedPorts()
+{
+  return {
+    BT::InputPort<double>("target_wait_timeout_s", 60.0, "Maximum time to wait for is_get=true"),
+    BT::InputPort<double>("engage_timeout_s", 180.0, "Maximum engagement duration"),
+    BT::InputPort<double>("offline_info_stale_s", 2.0, "Maximum accepted offline-info age"),
+  };
+}
+
+BT::NodeStatus EngageAtTarget::onStart()
+{
+  target_wait_timeout_s_ = getInput<double>("target_wait_timeout_s").value_or(60.0);
+  engage_timeout_s_ = getInput<double>("engage_timeout_s").value_or(180.0);
+  offline_stale_s_ = getInput<double>("offline_info_stale_s").value_or(2.0);
+
+  if (node_.hasTargetFinished()) {
+    RCLCPP_WARN(node_.get_logger(),
+      "EngageAtTarget entered after the target was already finished; skipping engagement.");
+    node_.setZeroHold(true);
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  node_.setCombatMode("WAIT_TARGET");
+  node_.beginAttackTracking();
+  node_.setZeroHold(true);
+
+  state_ = State::WAIT_ATTACK_START;
+  state_start_time_ = std::chrono::steady_clock::now();
+  RCLCPP_INFO(node_.get_logger(),
+    "Reached target: not_aim_enemy=false, stance=ATTACK, chassis zero hold active. "
+    "Waiting for is_get=true.");
+  return onRunning();
+}
+
+BT::NodeStatus EngageAtTarget::onRunning()
+{
+  if (offline_stale_s_ > 0.0 && node_.offlineInfoAgeSeconds() > offline_stale_s_) {
+    node_.setSafeMode("ATTACK_STALE");
+    RCLCPP_WARN(
+      node_.get_logger(), "Offline target info became stale during attack; ending attack and returning.");
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  switch (state_) {
+  case State::WAIT_ATTACK_START:
+    if (node_.attackStarted()) {
+      state_ = State::ENGAGE;
+      state_start_time_ = std::chrono::steady_clock::now();
+      RCLCPP_INFO(node_.get_logger(), "Attack started: is_get=true. Entering engagement.");
+      return onRunning();
+    }
+    if (target_wait_timeout_s_ > 0.0 && elapsedSeconds(state_start_time_) >= target_wait_timeout_s_) {
+      node_.setSafeMode("ATTACK_START_TIMEOUT");
+      RCLCPP_WARN(node_.get_logger(), "Attack start timeout; ending attack and returning.");
+      return BT::NodeStatus::SUCCESS;
+    }
+    return BT::NodeStatus::RUNNING;
+
+  case State::ENGAGE:
+    if (node_.attackFinished()) {
+      node_.finishCombatAndLatch();
+      RCLCPP_INFO(node_.get_logger(), "Attack finished: is_get=false. Auto aim disabled; returning.");
+      return BT::NodeStatus::SUCCESS;
+    }
+    if (engage_timeout_s_ > 0.0 && elapsedSeconds(state_start_time_) >= engage_timeout_s_) {
+      node_.setSafeMode("ATTACK_TIMEOUT");
+      RCLCPP_WARN(node_.get_logger(), "Attack execution timeout; ending attack and returning.");
+      return BT::NodeStatus::SUCCESS;
+    }
+    return BT::NodeStatus::RUNNING;
+  }
+
+  node_.reportFailure("engagement state machine reached an invalid state");
+  return BT::NodeStatus::FAILURE;
+}
+
+void EngageAtTarget::onHalted()
+{
+  node_.setSafeMode("ENGAGEMENT_HALTED");
+  node_.setZeroHold(true);
 }
 
 WaitForTarget::WaitForTarget(const std::string & name, const BT::NodeConfiguration & config)

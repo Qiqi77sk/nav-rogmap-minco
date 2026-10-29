@@ -26,13 +26,10 @@ int main(int argc, char ** argv)
     node->populateBlackboard(*blackboard);
 
     BT::BehaviorTreeFactory factory;
-    factory.registerNodeType<shengsai_bt::SetSafeMode>("SetSafeMode");
-    factory.registerNodeType<shengsai_bt::WaitForSystemReady>("WaitForSystemReady");
+    // Only the active three-node mission is registered. The legacy nodes remain
+    // in bt_nodes.cpp for history but are no longer part of the running tree.
     factory.registerNodeType<shengsai_bt::NavigateToGoal>("NavigateToGoal");
-    factory.registerNodeType<shengsai_bt::WaitForTarget>("WaitForTarget");
-    factory.registerNodeType<shengsai_bt::EngageUntilTargetLost>("EngageUntilTargetLost");
-    factory.registerNodeType<shengsai_bt::CompleteMission>("CompleteMission");
-    factory.registerNodeType<shengsai_bt::FailAndHold>("FailAndHold");
+    factory.registerNodeType<shengsai_bt::EngageAtTarget>("EngageAtTarget");
 
     const std::string tree_path =
       ament_index_cpp::get_package_share_directory("shengsai_bt") + "/tree/shengsai_mission.xml";
@@ -57,15 +54,34 @@ int main(int argc, char ** argv)
 
   try {
     while (rclcpp::ok()) {
-      tree->tickRoot();
+      const auto status = tree->tickRoot();
+      if (status == BT::NodeStatus::SUCCESS) {
+        node->markMissionComplete();
+        node->setZeroHold(true);
+        RCLCPP_INFO(node->get_logger(), "Mission completed; holding terminal safe state.");
+        break;
+      }
+      if (status == BT::NodeStatus::FAILURE) {
+        node->reportFailure("mission sequence failed");
+        node->setZeroHold(true);
+        break;
+      }
       loop_rate.sleep();
     }
   } catch (const std::exception & error) {
     RCLCPP_ERROR(node->get_logger(), "Behavior tree loop failed: %s", error.what());
+    tree->haltTree();
+    node->reportFailure(std::string("behavior tree exception: ") + error.what());
+    node->setZeroHold(true);
+  }
+
+  // The mission is latched after SUCCESS or FAILURE. Keep the ROS node and the
+  // 10 Hz safety publisher alive instead of tearing down the executor.
+  while (rclcpp::ok()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
   tree->haltTree();
-  node->setSafeMode("SHUTDOWN");
   node->requestStop();
   executor.cancel();
   executor_thread.join();

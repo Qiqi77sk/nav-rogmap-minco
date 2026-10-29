@@ -43,6 +43,7 @@ ShengsaiBtNode::ShengsaiBtNode() : Node("shengsai_bt")
 
   behavior_pub_ = create_publisher<ros_interfaces::msg::Behavior>("/sentry/behaivor_send", 10);
   cmd_vel_pub_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+  cmd_vel_mpc_pub_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel_mpc", 1);
 
   const double configured_hz = get_parameter("behavior_publish_hz").as_double();
   const double publish_hz = std::clamp(configured_hz, 1.0, 100.0);
@@ -136,6 +137,7 @@ void ShengsaiBtNode::setSafeMode(const std::string & phase)
 {
   combat_active_.store(false);
   aim_allowed_.store(false);
+  endAttackTracking();
   setPhase(phase);
 }
 
@@ -155,6 +157,7 @@ void ShengsaiBtNode::finishCombatAndLatch()
   combat_active_.store(false);
   aim_allowed_.store(false);
   target_finished_.store(true);
+  endAttackTracking();
   setPhase("TARGET_FINISHED");
 }
 
@@ -162,6 +165,7 @@ void ShengsaiBtNode::markMissionComplete()
 {
   combat_active_.store(false);
   aim_allowed_.store(false);
+  endAttackTracking();
   setPhase("COMPLETE");
   requestStop();
 }
@@ -170,6 +174,7 @@ void ShengsaiBtNode::reportFailure(const std::string & reason)
 {
   combat_active_.store(false);
   aim_allowed_.store(false);
+  endAttackTracking();
   if (!failure_reported_.exchange(true)) {
     RCLCPP_ERROR(get_logger(), "Shengsai mission failed: %s", reason.c_str());
   }
@@ -179,10 +184,54 @@ void ShengsaiBtNode::reportFailure(const std::string & reason)
 
 void ShengsaiBtNode::requestStop()
 {
+  setZeroHold(true);
   if (!stop_requested_.exchange(true)) {
     RCLCPP_WARN(get_logger(), "Shengsai mission stopping chassis command.");
   }
   publishStopCommand();
+}
+
+void ShengsaiBtNode::publishChassisZero()
+{
+  if (!cmd_vel_mpc_pub_) {
+    return;
+  }
+  geometry_msgs::msg::Twist stop;
+  cmd_vel_mpc_pub_->publish(stop);
+}
+
+void ShengsaiBtNode::setZeroHold(const bool active)
+{
+  zero_hold_active_.store(active);
+  if (active) {
+    publishChassisZero();
+  }
+}
+
+void ShengsaiBtNode::beginAttackTracking()
+{
+  std::lock_guard<std::mutex> lock(offline_info_mutex_);
+  attack_phase_active_ = true;
+  attack_started_ = false;
+  attack_finished_ = false;
+}
+
+void ShengsaiBtNode::endAttackTracking()
+{
+  std::lock_guard<std::mutex> lock(offline_info_mutex_);
+  attack_phase_active_ = false;
+}
+
+bool ShengsaiBtNode::attackStarted() const
+{
+  std::lock_guard<std::mutex> lock(offline_info_mutex_);
+  return attack_started_;
+}
+
+bool ShengsaiBtNode::attackFinished() const
+{
+  std::lock_guard<std::mutex> lock(offline_info_mutex_);
+  return attack_finished_;
 }
 
 void ShengsaiBtNode::offlineInfoCallback(const ros_interfaces::msg::SentryInfoOffline::SharedPtr msg)
@@ -193,6 +242,14 @@ void ShengsaiBtNode::offlineInfoCallback(const ros_interfaces::msg::SentryInfoOf
   last_offline_info_time_ = std::chrono::steady_clock::now();
   if (target_tracking_armed_ && !msg->is_get) {
     target_finished_.store(true);
+  }
+  if (attack_phase_active_) {
+    if (msg->is_get) {
+      attack_started_ = true;
+    } else if (attack_started_) {
+      attack_finished_ = true;
+      target_finished_.store(true);
+    }
   }
 }
 
@@ -239,6 +296,9 @@ void ShengsaiBtNode::publishBehavior()
 
   behavior_pub_->publish(behavior_msg);
 
+  if (zero_hold_active_.load()) {
+    publishChassisZero();
+  }
   if (stop_requested_.load()) {
     publishStopCommand();
   }
