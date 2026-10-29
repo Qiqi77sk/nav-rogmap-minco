@@ -445,16 +445,16 @@ EngageAtTarget::EngageAtTarget(const std::string & name, const BT::NodeConfigura
 BT::PortsList EngageAtTarget::providedPorts()
 {
   return {
-    BT::InputPort<double>("target_wait_timeout_s", 60.0, "Maximum time to wait for is_get=true"),
-    BT::InputPort<double>("engage_timeout_s", 180.0, "Maximum engagement duration"),
+    BT::InputPort<double>("target_wait_timeout_s", 30.0, "Maximum time to wait for is_get=true"),
+    BT::InputPort<double>("engage_timeout_s", 60.0, "Maximum engagement duration"),
     BT::InputPort<double>("offline_info_stale_s", 2.0, "Maximum accepted offline-info age"),
   };
 }
 
 BT::NodeStatus EngageAtTarget::onStart()
 {
-  target_wait_timeout_s_ = getInput<double>("target_wait_timeout_s").value_or(60.0);
-  engage_timeout_s_ = getInput<double>("engage_timeout_s").value_or(180.0);
+  target_wait_timeout_s_ = getInput<double>("target_wait_timeout_s").value_or(30.0);
+  engage_timeout_s_ = getInput<double>("engage_timeout_s").value_or(60.0);
   offline_stale_s_ = getInput<double>("offline_info_stale_s").value_or(2.0);
 
   if (node_.hasTargetFinished()) {

@@ -64,6 +64,13 @@ void MincoFsm::callMainFsmOnce()
   geometry_msgs::msg::PoseStamped current_pose;
   const bool has_odom = planner_->getRobotPose(current_pose);
 
+  // Waypoint checkpoint gating: only advance when the real robot pose is within the
+  // configured radius. Re-plan the global path to the next checkpoint on the spot.
+  if (state_ == State::FOLLOW_TRAJ && has_goal_ && has_odom &&
+    planner_->tryAdvanceWaypoint(current_pose)) {
+    changeState("WAYPOINT_REACHED", State::GENERATE_TRAJ);
+  }
+
   switch (state_) {
   case State::INIT: {
     if (!has_odom) {

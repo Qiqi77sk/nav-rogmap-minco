@@ -395,6 +395,8 @@ void MincoPlanner::configure(const nav2_util::LifecycleNode::WeakPtr & parent,
     goal_heading_blend_width_,
     yaw_goal_tolerance_);
 
+  configureWaypointRoutes(node, prefix);
+
   // --- Optimizer config ------------------------------------------------------
 
   nav2_util::declare_parameter_if_not_declared(
@@ -923,6 +925,174 @@ nav_msgs::msg::Path MincoPlanner::createPlan(
   return path;
 }
 
+void MincoPlanner::configureWaypointRoutes(
+  const nav2_util::LifecycleNode::SharedPtr & node, const std::string & prefix)
+{
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "waypoints.enable", rclcpp::ParameterValue(false));
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "waypoints.match_radius", rclcpp::ParameterValue(0.6));
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "waypoints.reached_radius", rclcpp::ParameterValue(0.30));
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "waypoints.route_a_goal", rclcpp::ParameterValue(std::vector<double>{}));
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "waypoints.route_a_points", rclcpp::ParameterValue(std::vector<double>{}));
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "waypoints.route_b_goal", rclcpp::ParameterValue(std::vector<double>{}));
+  nav2_util::declare_parameter_if_not_declared(
+    node, prefix + "waypoints.route_b_points", rclcpp::ParameterValue(std::vector<double>{}));
+
+  node->get_parameter(prefix + "waypoints.enable", waypoint_enable_);
+  node->get_parameter(prefix + "waypoints.match_radius", waypoint_match_radius_);
+  node->get_parameter(prefix + "waypoints.reached_radius", waypoint_reached_radius_);
+  if (!std::isfinite(waypoint_match_radius_) || waypoint_match_radius_ <= 0.0) {
+    waypoint_match_radius_ = 0.6;
+  }
+  if (!std::isfinite(waypoint_reached_radius_) || waypoint_reached_radius_ <= 0.0) {
+    waypoint_reached_radius_ = 0.30;
+  }
+
+  std::vector<double> goal_a;
+  std::vector<double> points_a;
+  std::vector<double> goal_b;
+  std::vector<double> points_b;
+  node->get_parameter(prefix + "waypoints.route_a_goal", goal_a);
+  node->get_parameter(prefix + "waypoints.route_a_points", points_a);
+  node->get_parameter(prefix + "waypoints.route_b_goal", goal_b);
+  node->get_parameter(prefix + "waypoints.route_b_points", points_b);
+
+  waypoint_routes_.clear();
+  auto add_route = [this, &node, &prefix](
+                     const std::vector<double> & goal,
+                     const std::vector<double> & points,
+                     const char * route_name) {
+      if (goal.size() != 2U || points.size() < 2U || (points.size() % 2U) != 0U) {
+        RCLCPP_WARN(logger_,
+          "[MincoPlanner] %swaypoints.%s is incomplete (goal_size=%zu, points_size=%zu); route ignored.",
+          prefix.c_str(),
+          route_name,
+          goal.size(),
+          points.size());
+        return;
+      }
+      WaypointRoute route;
+      route.goal = Eigen::Vector2d(goal[0], goal[1]);
+      route.points.reserve(points.size() / 2U);
+      for (size_t i = 0; i + 1U < points.size(); i += 2U) {
+        route.points.emplace_back(points[i], points[i + 1U]);
+      }
+      waypoint_routes_.push_back(std::move(route));
+    };
+  add_route(goal_a, points_a, "route_a");
+  add_route(goal_b, points_b, "route_b");
+
+  active_route_index_ = -1;
+  has_route_goal_ = false;
+  route_cursor_ = 0U;
+  has_route_final_goal_ = false;
+
+  RCLCPP_INFO(logger_,
+    "[MincoPlanner] waypoints: enable=%s routes=%zu match_radius=%.2f reached_radius=%.2f",
+    waypoint_enable_ ? "true" : "false",
+    waypoint_routes_.size(),
+    waypoint_match_radius_,
+    waypoint_reached_radius_);
+  for (size_t i = 0; i < waypoint_routes_.size(); ++i) {
+    RCLCPP_INFO(logger_,
+      "[MincoPlanner] waypoint route #%zu: goal=(%.2f, %.2f), points=%zu",
+      i,
+      waypoint_routes_[i].goal.x(),
+      waypoint_routes_[i].goal.y(),
+      waypoint_routes_[i].points.size());
+  }
+}
+
+void MincoPlanner::updateRouteSelection(const geometry_msgs::msg::PoseStamped & goal)
+{
+  if (waypoint_routes_.empty()) {
+    active_route_index_ = -1;
+    has_route_goal_ = false;
+    route_cursor_ = 0U;
+    return;
+  }
+
+  const Eigen::Vector2d goal_xy(goal.pose.position.x, goal.pose.position.y);
+  int route_index = -1;
+  double best_distance = std::numeric_limits<double>::max();
+  for (size_t i = 0; i < waypoint_routes_.size(); ++i) {
+    const double distance = (waypoint_routes_[i].goal - goal_xy).norm();
+    if (distance <= waypoint_match_radius_ && distance < best_distance) {
+      best_distance = distance;
+      route_index = static_cast<int>(i);
+    }
+  }
+
+  if (route_index < 0) {
+    // 不是配置过的路线终点：完全交给原来的单段规划。
+    active_route_index_ = -1;
+    has_route_goal_ = false;
+    route_cursor_ = 0U;
+    return;
+  }
+
+  const bool route_changed = route_index != active_route_index_;
+  // 小于 5 cm 的 goal 抖动视为同一个目标，避免重复下发时把检查点进度清零。
+  const bool goal_changed = !has_route_goal_ || (route_goal_xy_ - goal_xy).norm() > 5.0e-2;
+  if (route_changed || goal_changed) {
+    active_route_index_ = route_index;
+    route_goal_xy_ = goal_xy;
+    has_route_goal_ = true;
+    route_cursor_ = 0U;
+    RCLCPP_INFO(logger_,
+      "[MincoPlanner] waypoint route #%d selected for goal (%.2f, %.2f); checkpoint cursor reset.",
+      route_index,
+      goal_xy.x(),
+      goal_xy.y());
+  }
+}
+
+std::optional<Eigen::Vector2d> MincoPlanner::activeCheckpoint() const
+{
+  if (active_route_index_ < 0) {
+    return std::nullopt;
+  }
+  const auto & route = waypoint_routes_[static_cast<size_t>(active_route_index_)];
+  if (route_cursor_ >= route.points.size()) {
+    return std::nullopt;
+  }
+  return route.points[route_cursor_];
+}
+
+bool MincoPlanner::tryAdvanceWaypoint(const geometry_msgs::msg::PoseStamped & current_pose)
+{
+  if (active_route_index_ < 0) {
+    return false;
+  }
+  const auto & route = waypoint_routes_[static_cast<size_t>(active_route_index_)];
+  if (route_cursor_ >= route.points.size()) {
+    return false;
+  }
+
+  const Eigen::Vector2d current(current_pose.pose.position.x, current_pose.pose.position.y);
+  bool advanced = false;
+  while (route_cursor_ < route.points.size()) {
+    const double distance = (route.points[route_cursor_] - current).norm();
+    if (distance > waypoint_reached_radius_) {
+      break;
+    }
+    RCLCPP_INFO(logger_,
+      "[MincoPlanner] waypoint #%zu (%.2f, %.2f) reached (dist=%.3f m); advancing.",
+      route_cursor_,
+      route.points[route_cursor_].x(),
+      route.points[route_cursor_].y(),
+      distance);
+    ++route_cursor_;
+    advanced = true;
+  }
+  return advanced;
+}
+
 bool MincoPlanner::PlanGlobalPath(
   const geometry_msgs::msg::PoseStamped & start, const geometry_msgs::msg::PoseStamped & goal)
 {
@@ -943,16 +1113,53 @@ bool MincoPlanner::PlanGlobalPath(
     clearPlanVisualization();
     return false;
   }
+  // 路线选择 + 检查点进度。只有实际位姿进入 reached_radius 才会推进。
+  bool checkpoint_active = false;
+  geometry_msgs::msg::PoseStamped planning_goal = goal;
+  if (waypoint_enable_ && mode_context_->mode() == PlannerMode::PRIORMAP) {
+    updateRouteSelection(goal);
+    tryAdvanceWaypoint(start);
+    const auto checkpoint = activeCheckpoint();
+    if (checkpoint) {
+      checkpoint_active = true;
+      planning_goal.pose.position.x = checkpoint->x();
+      planning_goal.pose.position.y = checkpoint->y();
+      planning_goal.pose.position.z = 0.0;
+      // 检查点朝向：指向下一个检查点（最后一个指向最终目标），只用于末段 yaw 规划。
+      const auto & route = waypoint_routes_[static_cast<size_t>(active_route_index_)];
+      const Eigen::Vector2d next =
+        (route_cursor_ + 1U < route.points.size())
+          ? route.points[route_cursor_ + 1U]
+          : Eigen::Vector2d(goal.pose.position.x, goal.pose.position.y);
+      const Eigen::Vector2d direction = next - *checkpoint;
+      const double yaw = std::atan2(direction.y(), direction.x());
+      planning_goal.pose.orientation.x = 0.0;
+      planning_goal.pose.orientation.y = 0.0;
+      planning_goal.pose.orientation.z = std::sin(yaw * 0.5);
+      planning_goal.pose.orientation.w = std::cos(yaw * 0.5);
+      RCLCPP_INFO(logger_,
+        "[MincoPlanner] checkpoint plan: route #%d cursor=%zu target=(%.2f, %.2f), goal=(%.2f, %.2f)",
+        active_route_index_,
+        route_cursor_,
+        checkpoint->x(),
+        checkpoint->y(),
+        goal.pose.position.x,
+        goal.pose.position.y);
+    }
+  }
+
   std::vector<geometry_msgs::msg::PoseStamped> planned_path;
-  if (!global_path_searcher_->plan(start, goal, *mode_context_, planned_path) || planned_path.size() < 2U) {
+  if (!global_path_searcher_->plan(
+        start, planning_goal, *mode_context_, planned_path, checkpoint_active) ||
+      planned_path.size() < 2U) {
     record_search_time();
     clearPlanVisualization();
     return false;
   }
   record_search_time();
 
-  // SMAC/A* only guarantees endpoint position; preserve the caller's goal heading explicitly.
-  const auto & goal_orientation = goal.pose.orientation;
+  // SMAC/A* only guarantees endpoint position; preserve the planning goal heading explicitly.
+  const auto & goal_orientation = planning_goal.pose.orientation;
   const double orientation_norm_sq =
     goal_orientation.x * goal_orientation.x + goal_orientation.y * goal_orientation.y +
     goal_orientation.z * goal_orientation.z + goal_orientation.w * goal_orientation.w;
@@ -967,6 +1174,10 @@ bool MincoPlanner::PlanGlobalPath(
 
   std::lock_guard<std::mutex> path_lock(path_mutex_);
   latest_global_path_ = std::move(planned_path);
+  has_route_final_goal_ = checkpoint_active;
+  if (checkpoint_active) {
+    route_final_goal_ = goal;
+  }
   return true;
 }
 
@@ -1852,6 +2063,7 @@ void MincoPlanner::clearPlanVisualization()
   {
     std::lock_guard<std::mutex> lock(path_mutex_);
     latest_global_path_.clear();
+    has_route_final_goal_ = false;
   }
   if (visualizer_) {
     visualizer_->clearPlanVisualization();
@@ -1967,7 +2179,9 @@ bool MincoPlanner::checkGoalReached(const geometry_msgs::msg::PoseStamped & curr
     return false;
   }
 
-  const auto & goal_pose = latest_global_path_.back().pose;
+  // 检查点路径的终点是中间节点，最终到达判定必须用真实 Nav2 目标。
+  const geometry_msgs::msg::Pose goal_pose =
+    has_route_final_goal_ ? route_final_goal_.pose : latest_global_path_.back().pose;
   const auto & goal = goal_pose.position;
   const double dx = current_pose.pose.position.x - goal.x;
   const double dy = current_pose.pose.position.y - goal.y;

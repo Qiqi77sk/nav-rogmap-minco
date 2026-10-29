@@ -275,7 +275,8 @@ bool SmacPlanner2DSimple::createPath(const unsigned int & start_x,
   const unsigned int & goal_x,
   const unsigned int & goal_y,
   CoordinateVector & path,
-  std::function<bool()> cancel_checker)
+  std::function<bool()> cancel_checker,
+  bool relax_goal_esdf)
 {
   path.clear();
 
@@ -332,7 +333,8 @@ bool SmacPlanner2DSimple::createPath(const unsigned int & start_x,
     return false;
   }
 
-  const auto is_traversable = [this, charmap](const uint64_t index) -> bool {
+  const auto is_traversable =
+    [this, charmap, relax_goal_esdf, goal_index](const uint64_t index) -> bool {
     const unsigned char cost = charmap[static_cast<size_t>(index)];
     if (cost == nav2_costmap_2d::NO_INFORMATION) {
       if (!allow_unknown_) {
@@ -340,6 +342,10 @@ bool SmacPlanner2DSimple::createPath(const unsigned int & start_x,
       }
     } else if (cost >= nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE) {
       return false;
+    }
+    if (relax_goal_esdf && index == goal_index) {
+      // 引导型目标只受静态代价地图约束，避免被实时 ESDF 的 0.25 m 判定否决。
+      return true;
     }
     const unsigned int mx = static_cast<unsigned int>(index % static_cast<uint64_t>(size_x_));
     const unsigned int my = static_cast<unsigned int>(index / static_cast<uint64_t>(size_x_));

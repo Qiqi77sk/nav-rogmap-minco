@@ -235,18 +235,20 @@ bool GlobalPathSearcher::normalizePoseToFrame(const geometry_msgs::msg::PoseStam
 bool GlobalPathSearcher::plan(const geometry_msgs::msg::PoseStamped & start,
   const geometry_msgs::msg::PoseStamped & goal,
   const PlannerModeContext & mode_context,
-  std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path)
+  std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path,
+  bool relax_goal_esdf)
 {
   if (mode_context.mode() == PlannerMode::PRIORMAP) {
-    return planPriorMap(start, goal, mode_context, latest_global_path);
+    return planPriorMap(start, goal, mode_context, latest_global_path, relax_goal_esdf);
   }
-  return planExploration(start, goal, mode_context, latest_global_path);
+  return planExploration(start, goal, mode_context, latest_global_path, relax_goal_esdf);
 }
 
 bool GlobalPathSearcher::planPriorMap(const geometry_msgs::msg::PoseStamped & start,
   const geometry_msgs::msg::PoseStamped & goal,
   const PlannerModeContext & mode_context,
-  std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path)
+  std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path,
+  bool relax_goal_esdf)
 {
   if (!astar_ || !mode_context.globalQuery()) {
     RCLCPP_ERROR(logger_, "[MincoPlanner] Nav2 costmap global search query is unavailable.");
@@ -278,13 +280,15 @@ bool GlobalPathSearcher::planPriorMap(const geometry_msgs::msg::PoseStamped & st
     tolerance_,
     cancel_checker,
     dummy,
-    latest_global_path);
+    latest_global_path,
+    relax_goal_esdf);
 }
 
 bool GlobalPathSearcher::planExploration(const geometry_msgs::msg::PoseStamped & start,
   const geometry_msgs::msg::PoseStamped & goal,
   const PlannerModeContext & mode_context,
-  std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path)
+  std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path,
+  bool relax_goal_esdf)
 {
   const auto query = mode_context.globalQuery();
   if (!astar_ || !query) {
@@ -337,7 +341,8 @@ bool GlobalPathSearcher::planExploration(const geometry_msgs::msg::PoseStamped &
           tolerance_,
           cancel_checker,
           direct_plan,
-          latest_global_path)) {
+          latest_global_path,
+          relax_goal_esdf)) {
       return true;
     }
     RCLCPP_WARN(logger_,
@@ -526,7 +531,8 @@ bool GlobalPathSearcher::makePlan(const geometry_msgs::msg::Pose & start,
     tolerance,
     cancel_checker,
     plan,
-    ignored_path);
+    ignored_path,
+    false);
 }
 
 bool GlobalPathSearcher::makePlanOnQuery(const geometry_msgs::msg::Pose & start,
@@ -537,7 +543,8 @@ bool GlobalPathSearcher::makePlanOnQuery(const geometry_msgs::msg::Pose & start,
   double tolerance,
   std::function<bool()> cancel_checker,
   nav_msgs::msg::Path & plan,
-  std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path)
+  std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path,
+  bool relax_goal_esdf)
 {
   plan.poses.clear();
   plan.header.stamp = rclcpp::Clock().now();
@@ -634,7 +641,8 @@ bool GlobalPathSearcher::makePlanOnQuery(const geometry_msgs::msg::Pose & start,
 
   if (use_smac_ && smac_) {
     smac::SmacPlanner2DSimple::CoordinateVector smac_path;
-    bool smac_success = smac_->createPath(mx_start, my_start, mx_goal, my_goal, smac_path, cancel_checker);
+    bool smac_success = smac_->createPath(
+      mx_start, my_start, mx_goal, my_goal, smac_path, cancel_checker, relax_goal_esdf);
 
     if (!smac_success || smac_path.size() < 2) {
       // A goal inside the robot's current cell cannot produce a two-pose SMAC

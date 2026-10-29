@@ -6,6 +6,7 @@
 #include "ros_interfaces/msg/sentry_info_offline.hpp"
 
 #include <limits>
+#include <optional>
 
 namespace rog_map {
 class ROGMapROS;
@@ -66,6 +67,9 @@ public:
   bool getRobotPose(geometry_msgs::msg::PoseStamped & pose) const;
   bool checkGoalReached(const geometry_msgs::msg::PoseStamped & current_pose);
   bool consumePendingGoal(geometry_msgs::msg::PoseStamped & goal_out);
+  // 检查点门控：只有机器人实际位姿进入 waypoints.reached_radius 才推进路线游标。
+  // 由 MincoFsm 在 FOLLOW_TRAJ 中调用；返回 true 表示到达了一个检查点。
+  bool tryAdvanceWaypoint(const geometry_msgs::msg::PoseStamped & current_pose);
   void clearPlanVisualization();
   void cancelGoal();
   Eigen::Vector3d getCurrentSpeed() const;
@@ -87,6 +91,13 @@ public:
 
 private:
   // === Internal Types ===
+  // 一条“终点 -> 中间点序列”的全局路径引导路线。中间点只有 x/y，不含 yaw。
+  struct WaypointRoute
+  {
+    Eigen::Vector2d goal{Eigen::Vector2d::Zero()};
+    std::vector<Eigen::Vector2d> points;
+  };
+
   enum class PlanningState
   {
     COLD_START,     // Full replanning with zero initial velocity/acceleration.
@@ -143,6 +154,14 @@ private:
     const std::string & context,
     geometry_msgs::msg::PoseStamped & out) const;
 
+  // === Planner-level waypoint routes（检查点门控） ===
+  void configureWaypointRoutes(
+    const nav2_util::LifecycleNode::SharedPtr & node, const std::string & prefix);
+  // 根据最终 goal 选择路线；路线或 goal 变化时把游标清零。
+  void updateRouteSelection(const geometry_msgs::msg::PoseStamped & goal);
+  // 当前未到达的检查点；没有则为空。
+  std::optional<Eigen::Vector2d> activeCheckpoint() const;
+
   // === ROS 2 Interfaces (Publishers, Subscribers, Timers) ===
   rclcpp::Publisher<ros_interfaces::msg::MpcPositionCommand>::SharedPtr opt_path_pub_;
   rclcpp::Publisher<ros_interfaces::msg::MpcPositionCommand>::SharedPtr backup_path_pub_;
@@ -184,6 +203,18 @@ private:
   double goal_heading_brake_trigger_dist_{1.0};
   double goal_heading_blend_width_{0.5};
   double yaw_goal_tolerance_{0.15};
+  // 全局路径检查点（门控：实际位姿进入 reached_radius 才推进到下一个点）
+  std::vector<WaypointRoute> waypoint_routes_;
+  bool waypoint_enable_{false};
+  double waypoint_match_radius_{0.6};
+  double waypoint_reached_radius_{0.30};
+  int active_route_index_{-1};
+  bool has_route_goal_{false};
+  Eigen::Vector2d route_goal_xy_{Eigen::Vector2d::Zero()};
+  size_t route_cursor_{0};
+  // 当前全局路径只规划到检查点时，checkGoalReached 必须改用最终 Nav2 目标
+  geometry_msgs::msg::PoseStamped route_final_goal_;
+  bool has_route_final_goal_{false};
   MincoOptimizer::Config minco_config;
   RecoverServer::Config recovery_server_config_{};
   PlannerPerformanceMonitor planner_perf_monitor_;

@@ -345,6 +345,38 @@ planner_server:
         brake_trigger_dist: 1.0
         blend_width: 0.5
         yaw_goal_tolerance: 0.15
+      # 全局路径中间点：只给 x/y，不给 yaw；起终点 yaw 仍由 Nav2 goal 提供。
+      # 仅当 goal 落在 route_a_goal / route_b_goal 的 match_radius 内才生效，
+      # 只在 PRIORMAP 模式下使用；其他 goal 完全走原来的单段搜索。
+      # 坐标必须在 map 系，与 shengsai_bt 下发的目标点同一坐标系。
+      waypoints:
+        enable: true
+        match_radius: 0.60      # goal 与 route_*_goal 的匹配半径 [m]
+        reached_radius: 0.30    # 检查点门控：机器人实际位姿进入该半径才推进到下一个点 [m]
+        # 去程：终点是射击区 (0.40, 0.40)，与 shengsai_bt/config/shengsai.yaml 的 target_x/target_y 一致
+        route_a_goal: [0.40, 0.40]
+        route_a_points: [
+          7.10, 3.25,   # N02 右上走廊
+          4.00, 3.25,   # N01 顶部走廊西端
+          4.00, 2.15,   # N06 中段东侧
+          2.70, 2.15,   # N05 中段
+          2.70, 1.05,   # N08 下段
+          1.60, 1.05,   # N07 下段西侧
+          1.60, 2.15,   # N04 左侧通道
+          0.50, 2.15    # N03 左侧道路
+        ]
+        # 返程：终点是启动区 (8.25, 2.15)，与 shengsai_bt/config/shengsai.yaml 的 start_x/start_y 一致
+        route_b_goal: [8.25, 2.15]
+        route_b_points: [
+          0.50, 2.15,   # N03
+          1.60, 2.15,   # N04
+          1.60, 1.05,   # N07
+          2.70, 1.05,   # N08
+          2.70, 2.15,   # N05
+          4.00, 2.15,   # N06
+          4.00, 3.25,   # N01
+          7.10, 3.25    # N02
+        ]
       performance:
         enable: false
         print_enable: false

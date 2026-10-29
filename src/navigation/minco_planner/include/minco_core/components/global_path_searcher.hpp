@@ -21,10 +21,14 @@ public:
 
   void setQuery(const std::shared_ptr<rog_map::MapQueryInterface> & global_query);
 
+  // 单段全局路径搜索。
+  // relax_goal_esdf=true 时，只对“目标格”放宽实时 ESDF 的 collision_dist 判定，
+  // 用于中间检查点（路点是引导点，不是最终避障目标）。
   bool plan(const geometry_msgs::msg::PoseStamped & start,
     const geometry_msgs::msg::PoseStamped & goal,
     const PlannerModeContext & mode_context,
-    std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path);
+    std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path,
+    bool relax_goal_esdf = false);
 
   bool makePlan(const geometry_msgs::msg::Pose & start,
     const geometry_msgs::msg::Pose & goal,
@@ -43,12 +47,14 @@ private:
   bool planPriorMap(const geometry_msgs::msg::PoseStamped & start,
     const geometry_msgs::msg::PoseStamped & goal,
     const PlannerModeContext & mode_context,
-    std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path);
+    std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path,
+    bool relax_goal_esdf);
 
   bool planExploration(const geometry_msgs::msg::PoseStamped & start,
     const geometry_msgs::msg::PoseStamped & goal,
     const PlannerModeContext & mode_context,
-    std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path);
+    std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path,
+    bool relax_goal_esdf);
 
   bool makePlanOnQuery(const geometry_msgs::msg::Pose & start,
     const geometry_msgs::msg::Pose & goal,
@@ -58,7 +64,8 @@ private:
     double tolerance,
     std::function<bool()> cancel_checker,
     nav_msgs::msg::Path & plan,
-    std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path);
+    std::vector<geometry_msgs::msg::PoseStamped> & latest_global_path,
+    bool relax_goal_esdf);
 
   std::shared_ptr<tf2_ros::Buffer> tf_;
   Astar * astar_{nullptr};

@@ -99,12 +99,15 @@ public:
    * @param cancel_checker Function to check if planning should be canceled
    * @return true if path found
    */
+  // relax_goal_esdf=true 时只对目标格跳过实时 ESDF 的 collision_dist 判定，
+  // 用于“引导型”目标（中间检查点），静态代价地图的膨胀检查仍然生效。
   bool createPath(const unsigned int & start_x,
     const unsigned int & start_y,
     const unsigned int & goal_x,
     const unsigned int & goal_y,
     CoordinateVector & path,
-    std::function<bool()> cancel_checker = nullptr);
+    std::function<bool()> cancel_checker = nullptr,
+    bool relax_goal_esdf = false);
 
   /**
    * @brief Set parameters
