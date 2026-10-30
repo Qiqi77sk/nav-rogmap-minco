@@ -46,7 +46,12 @@ ReturnToStart
 - feedback 新鲜（默认 2 s 内）；
 - feedback 位姿在 `map` 系；
 - 距目标不超过 `arrival_xy_tolerance`（默认 0.20 m）；
-- yaw 误差不超过 `arrival_yaw_tolerance`（默认 0.15 rad）。
+- **底盘 IMU yaw** 与目标 yaw 的误差不超过 `arrival_yaw_tolerance`（默认 0.15 rad）。
+
+> yaw 不使用 feedback 位姿的朝向。`map -> base_link` 的 `base_link` 由 Point-LIO 发布，
+> 其 `camera_init -> base_link` 旋转恒为单位四元数，feedback yaw 不随底盘旋转。
+> 因此 yaw 改用 `/sentry/offline_info.chassis_yaw_camerainit`（0.25 s 内新鲜），
+> 并把 `map` 下的目标 yaw 转到 `camera_init` 后比较；任一侧无效时不判到达。
 
 触发方式有两种：
 

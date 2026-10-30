@@ -91,11 +91,12 @@ public:
 
 private:
   // === Internal Types ===
-  // 一条“终点 -> 中间点序列”的全局路径引导路线。中间点只有 x/y，不含 yaw。
+  // 一条“终点 -> 中间点序列”的全局路径引导路线。中间点包含 x/y/yaw，
+  // yaw 为该检查点要求的到达朝向，只用于本段末段 yaw 规划。
   struct WaypointRoute
   {
     Eigen::Vector2d goal{Eigen::Vector2d::Zero()};
-    std::vector<Eigen::Vector2d> points;
+    std::vector<Eigen::Vector3d> points;
   };
 
   enum class PlanningState
@@ -160,7 +161,7 @@ private:
   // 根据最终 goal 选择路线；路线或 goal 变化时把游标清零。
   void updateRouteSelection(const geometry_msgs::msg::PoseStamped & goal);
   // 当前未到达的检查点；没有则为空。
-  std::optional<Eigen::Vector2d> activeCheckpoint() const;
+  std::optional<Eigen::Vector3d> activeCheckpoint() const;
 
   // === ROS 2 Interfaces (Publishers, Subscribers, Timers) ===
   rclcpp::Publisher<ros_interfaces::msg::MpcPositionCommand>::SharedPtr opt_path_pub_;

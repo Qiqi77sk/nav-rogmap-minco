@@ -32,8 +32,11 @@ ShengsaiBtNode::ShengsaiBtNode() : Node("shengsai_bt")
   declare_parameter<double>("offline_info_stale_s", 2.0);
   declare_parameter<double>("navigation_timeout_s", 120.0);
   declare_parameter<int>("navigation_retries", 2);
-  declare_parameter<double>("target_wait_timeout_s", 60.0);
-  declare_parameter<double>("engage_timeout_s", 180.0);
+  declare_parameter<double>("target_wait_timeout_s", 20.0);
+  declare_parameter<double>("engage_timeout_s", 20.0);
+
+  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
   navigation_client_ = rclcpp_action::create_client<NavigateToPose>(this, "navigate_to_pose");
   offline_info_sub_ = create_subscription<ros_interfaces::msg::SentryInfoOffline>(
@@ -115,6 +118,29 @@ double ShengsaiBtNode::offlineInfoAgeSeconds() const
     return std::numeric_limits<double>::infinity();
   }
   return std::chrono::duration<double>(std::chrono::steady_clock::now() - last_offline_info_time_).count();
+}
+
+bool ShengsaiBtNode::getFreshChassisYawCameraInit(double & yaw, const double max_age_s) const
+{
+  std::lock_guard<std::mutex> lock(offline_info_mutex_);
+  if (!std::isfinite(chassis_yaw_camerainit_) ||
+      last_chassis_yaw_time_ == std::chrono::steady_clock::time_point{}) {
+    return false;
+  }
+  if (max_age_s > 0.0) {
+    const double age_s =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - last_chassis_yaw_time_).count();
+    if (age_s > max_age_s) {
+      return false;
+    }
+  }
+  yaw = chassis_yaw_camerainit_;
+  return true;
+}
+
+const std::shared_ptr<tf2_ros::Buffer> & ShengsaiBtNode::tfBuffer() const
+{
+  return tf_buffer_;
 }
 
 void ShengsaiBtNode::populateBlackboard(BT::Blackboard & blackboard) const
@@ -240,6 +266,10 @@ void ShengsaiBtNode::offlineInfoCallback(const ros_interfaces::msg::SentryInfoOf
   is_get_ = msg->is_get;
   has_offline_info_ = true;
   last_offline_info_time_ = std::chrono::steady_clock::now();
+  if (std::isfinite(msg->chassis_yaw_camerainit)) {
+    chassis_yaw_camerainit_ = msg->chassis_yaw_camerainit;
+    last_chassis_yaw_time_ = std::chrono::steady_clock::now();
+  }
   if (target_tracking_armed_ && !msg->is_get) {
     target_finished_.store(true);
   }

@@ -19,5 +19,5 @@ shengsai_bt:
     offline_info_stale_s: 2.0
     navigation_timeout_s: 120.0
     navigation_retries: 2
-    target_wait_timeout_s: 30.0
-    engage_timeout_s: 60.0
+    target_wait_timeout_s: 20.0
+    engage_timeout_s: 20.0

@@ -16,6 +16,8 @@ find_package(nav2_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(ros_interfaces REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 add_executable(shengsai_bt_node
   src/main.cpp
@@ -35,6 +37,8 @@ ament_target_dependencies(shengsai_bt_node
   rclcpp
   rclcpp_action
   ros_interfaces
+  tf2_geometry_msgs
+  tf2_ros
 )
 
 install(TARGETS

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -13,6 +14,8 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <ros_interfaces/msg/behavior.hpp>
 #include <ros_interfaces/msg/sentry_info_offline.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
 namespace shengsai_bt {
 
@@ -30,6 +33,9 @@ public:
   bool armTargetTrackingIfAcquired(double max_age_s);
   bool hasFreshOfflineInfo(double max_age_s) const;
   double offlineInfoAgeSeconds() const;
+  // 底盘 IMU yaw（camera_init 系）；NaN 或过期时返回 false。
+  bool getFreshChassisYawCameraInit(double & yaw, double max_age_s = 0.25) const;
+  const std::shared_ptr<tf2_ros::Buffer> & tfBuffer() const;
 
   void populateBlackboard(BT::Blackboard & blackboard) const;
   void setSafeMode(const std::string & phase);
@@ -54,6 +60,8 @@ private:
 
   rclcpp_action::Client<NavigateToPose>::SharedPtr navigation_client_;
   rclcpp::Subscription<ros_interfaces::msg::SentryInfoOffline>::SharedPtr offline_info_sub_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Publisher<ros_interfaces::msg::Behavior>::SharedPtr behavior_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_mpc_pub_;
@@ -74,6 +82,8 @@ private:
   bool attack_started_{false};
   bool attack_finished_{false};
   std::chrono::steady_clock::time_point last_offline_info_time_{};
+  double chassis_yaw_camerainit_{std::numeric_limits<double>::quiet_NaN()};
+  std::chrono::steady_clock::time_point last_chassis_yaw_time_{};
 
   mutable std::mutex phase_mutex_;
   std::string phase_{"WAIT_SYSTEM_READY"};

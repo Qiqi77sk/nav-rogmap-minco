@@ -124,8 +124,8 @@ private:
   };
 
   ShengsaiBtNode & node_;
-  double target_wait_timeout_s_{60.0};
-  double engage_timeout_s_{180.0};
+  double target_wait_timeout_s_{20.0};
+  double engage_timeout_s_{20.0};
   double offline_stale_s_{2.0};
   State state_{State::WAIT_ATTACK_START};
   std::chrono::steady_clock::time_point state_start_time_{};

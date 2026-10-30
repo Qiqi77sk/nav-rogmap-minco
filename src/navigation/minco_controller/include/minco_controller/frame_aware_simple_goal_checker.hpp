@@ -1,10 +1,14 @@
 #pragma once
 
+#include <chrono>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "nav2_controller/plugins/simple_goal_checker.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
+#include "ros_interfaces/msg/sentry_info_offline.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
@@ -33,9 +37,15 @@ public:
     const geometry_msgs::msg::Twist & velocity) override;
 
 private:
+  bool getFreshChassisYaw(double & yaw) const;
+
   rclcpp_lifecycle::LifecycleNode::SharedPtr node_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  rclcpp::Subscription<ros_interfaces::msg::SentryInfoOffline>::SharedPtr chassis_info_sub_;
+  mutable std::mutex chassis_yaw_mutex_;
+  double chassis_yaw_camerainit_{std::numeric_limits<double>::quiet_NaN()};
+  std::chrono::steady_clock::time_point chassis_yaw_rx_{};
   std::string goal_frame_{"map"};
   std::string query_frame_{"camera_init"};
 };

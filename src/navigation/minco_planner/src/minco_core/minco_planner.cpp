@@ -967,7 +967,7 @@ void MincoPlanner::configureWaypointRoutes(
                      const std::vector<double> & goal,
                      const std::vector<double> & points,
                      const char * route_name) {
-      if (goal.size() != 2U || points.size() < 2U || (points.size() % 2U) != 0U) {
+      if (goal.size() != 2U || points.size() < 3U || (points.size() % 3U) != 0U) {
         RCLCPP_WARN(logger_,
           "[MincoPlanner] %swaypoints.%s is incomplete (goal_size=%zu, points_size=%zu); route ignored.",
           prefix.c_str(),
@@ -978,9 +978,9 @@ void MincoPlanner::configureWaypointRoutes(
       }
       WaypointRoute route;
       route.goal = Eigen::Vector2d(goal[0], goal[1]);
-      route.points.reserve(points.size() / 2U);
-      for (size_t i = 0; i + 1U < points.size(); i += 2U) {
-        route.points.emplace_back(points[i], points[i + 1U]);
+      route.points.reserve(points.size() / 3U);
+      for (size_t i = 0; i + 2U < points.size(); i += 3U) {
+        route.points.emplace_back(points[i], points[i + 1U], points[i + 2U]);
       }
       waypoint_routes_.push_back(std::move(route));
     };
@@ -1052,7 +1052,7 @@ void MincoPlanner::updateRouteSelection(const geometry_msgs::msg::PoseStamped & 
   }
 }
 
-std::optional<Eigen::Vector2d> MincoPlanner::activeCheckpoint() const
+std::optional<Eigen::Vector3d> MincoPlanner::activeCheckpoint() const
 {
   if (active_route_index_ < 0) {
     return std::nullopt;
@@ -1077,7 +1077,9 @@ bool MincoPlanner::tryAdvanceWaypoint(const geometry_msgs::msg::PoseStamped & cu
   const Eigen::Vector2d current(current_pose.pose.position.x, current_pose.pose.position.y);
   bool advanced = false;
   while (route_cursor_ < route.points.size()) {
-    const double distance = (route.points[route_cursor_] - current).norm();
+    const double distance = std::hypot(
+      route.points[route_cursor_].x() - current.x(),
+      route.points[route_cursor_].y() - current.y());
     if (distance > waypoint_reached_radius_) {
       break;
     }
@@ -1125,14 +1127,8 @@ bool MincoPlanner::PlanGlobalPath(
       planning_goal.pose.position.x = checkpoint->x();
       planning_goal.pose.position.y = checkpoint->y();
       planning_goal.pose.position.z = 0.0;
-      // 检查点朝向：指向下一个检查点（最后一个指向最终目标），只用于末段 yaw 规划。
-      const auto & route = waypoint_routes_[static_cast<size_t>(active_route_index_)];
-      const Eigen::Vector2d next =
-        (route_cursor_ + 1U < route.points.size())
-          ? route.points[route_cursor_ + 1U]
-          : Eigen::Vector2d(goal.pose.position.x, goal.pose.position.y);
-      const Eigen::Vector2d direction = next - *checkpoint;
-      const double yaw = std::atan2(direction.y(), direction.x());
+      // 检查点朝向：使用路线配置的到达 yaw，只用于末段 yaw 规划。
+      const double yaw = checkpoint->z();
       planning_goal.pose.orientation.x = 0.0;
       planning_goal.pose.orientation.y = 0.0;
       planning_goal.pose.orientation.z = std::sin(yaw * 0.5);

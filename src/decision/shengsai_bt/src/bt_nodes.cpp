@@ -7,6 +7,9 @@
 #include <stdexcept>
 #include <utility>
 
+#include <tf2/exceptions.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+
 using namespace std::chrono_literals;
 
 namespace shengsai_bt {
@@ -399,8 +402,38 @@ bool NavigateToGoal::feedbackNearGoal(double & distance, double & yaw_error) con
   }
 
   distance = std::hypot(pose.pose.position.x - goal_x_, pose.pose.position.y - goal_y_);
-  const double feedback_yaw = yawFromQuaternion(pose.pose.orientation);
-  yaw_error = std::atan2(std::sin(goal_yaw_ - feedback_yaw), std::cos(goal_yaw_ - feedback_yaw));
+
+  // Nav2 feedback 的 current_pose 来自 map->base_link；Point-LIO 发布的
+  // camera_init->base_link 旋转恒为单位四元数，因此 feedback yaw 不代表底盘朝向。
+  // 到点 yaw 改用 /sentry/offline_info.chassis_yaw_camerainit，并把 map 下的 goal yaw
+  // 转到 camera_init 后比较。
+  double chassis_yaw_camera_init = 0.0;
+  if (!node_.getFreshChassisYawCameraInit(chassis_yaw_camera_init, 0.25)) {
+    return false;
+  }
+
+  geometry_msgs::msg::PoseStamped goal_pose;
+  goal_pose.header.frame_id = "map";
+  goal_pose.header.stamp = rclcpp::Time(0);
+  goal_pose.pose.position.x = goal_x_;
+  goal_pose.pose.position.y = goal_y_;
+  goal_pose.pose.position.z = 0.0;
+  goal_pose.pose.orientation.x = 0.0;
+  goal_pose.pose.orientation.y = 0.0;
+  goal_pose.pose.orientation.z = std::sin(goal_yaw_ * 0.5);
+  goal_pose.pose.orientation.w = std::cos(goal_yaw_ * 0.5);
+
+  geometry_msgs::msg::PoseStamped goal_in_camera_init;
+  try {
+    goal_in_camera_init = node_.tfBuffer()->transform(goal_pose, "camera_init");
+  } catch (const tf2::TransformException &) {
+    return false;
+  }
+
+  const double goal_yaw_camera_init = yawFromQuaternion(goal_in_camera_init.pose.orientation);
+  yaw_error = std::atan2(
+    std::sin(goal_yaw_camera_init - chassis_yaw_camera_init),
+    std::cos(goal_yaw_camera_init - chassis_yaw_camera_init));
   return distance <= arrival_xy_tolerance_ && std::abs(yaw_error) <= arrival_yaw_tolerance_;
 }
 
@@ -445,16 +478,16 @@ EngageAtTarget::EngageAtTarget(const std::string & name, const BT::NodeConfigura
 BT::PortsList EngageAtTarget::providedPorts()
 {
   return {
-    BT::InputPort<double>("target_wait_timeout_s", 30.0, "Maximum time to wait for is_get=true"),
-    BT::InputPort<double>("engage_timeout_s", 60.0, "Maximum engagement duration"),
+    BT::InputPort<double>("target_wait_timeout_s", 20.0, "Maximum time to wait for is_get=true"),
+    BT::InputPort<double>("engage_timeout_s", 20.0, "Maximum engagement duration"),
     BT::InputPort<double>("offline_info_stale_s", 2.0, "Maximum accepted offline-info age"),
   };
 }
 
 BT::NodeStatus EngageAtTarget::onStart()
 {
-  target_wait_timeout_s_ = getInput<double>("target_wait_timeout_s").value_or(30.0);
-  engage_timeout_s_ = getInput<double>("engage_timeout_s").value_or(60.0);
+  target_wait_timeout_s_ = getInput<double>("target_wait_timeout_s").value_or(20.0);
+  engage_timeout_s_ = getInput<double>("engage_timeout_s").value_or(20.0);
   offline_stale_s_ = getInput<double>("offline_info_stale_s").value_or(2.0);
 
   if (node_.hasTargetFinished()) {
