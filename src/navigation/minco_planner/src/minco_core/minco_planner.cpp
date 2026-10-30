@@ -2254,28 +2254,39 @@ bool MincoPlanner::getFreshChassisYawCameraInit(double & yaw) const
 
 double MincoPlanner::getCurrentYawFromOdom() const
 {
-  double chassis_yaw = 0.0;
-  if (goal_heading_enable_ && getFreshChassisYawCameraInit(chassis_yaw)) {
-    if (planning_frame_ == rog_frame_) {
-      return chassis_yaw;
-    }
-    if (tf_) {
-      try {
-        const auto transform =
-          tf_->lookupTransform(planning_frame_, rog_frame_, tf2::TimePointZero);
-        const double yaw_in_planning =
-          chassis_yaw + utils::quaternionToYaw(transform.transform.rotation);
-        return std::atan2(std::sin(yaw_in_planning), std::cos(yaw_in_planning));
-      } catch (const tf2::TransformException &) {
-      }
+  // 实验：导航朝向优先使用 Point-LIO 雷达 yaw（与位置/速度同源）；
+  // 无 odom 时再回退到 /sentry/offline_info.chassis_yaw_camerainit。
+  // odom 在 rog_frame_（camera_init），规划在 planning_frame_（map），比较前需转换。
+  double source_yaw = 0.0;
+  bool has_source_yaw = false;
+  {
+    std::lock_guard<std::mutex> lk(odom_mutex_);
+    if (has_latest_odom_) {
+      source_yaw = utils::quaternionToYaw(latest_odom_.pose.pose.orientation);
+      has_source_yaw = std::isfinite(source_yaw);
     }
   }
-
-  std::lock_guard<std::mutex> lk(odom_mutex_);
-  if (!has_latest_odom_) {
+  if (!has_source_yaw && goal_heading_enable_) {
+    has_source_yaw = getFreshChassisYawCameraInit(source_yaw);
+  }
+  if (!has_source_yaw) {
     return 0.0;
   }
-  return utils::quaternionToYaw(latest_odom_.pose.pose.orientation);
+
+  if (planning_frame_ == rog_frame_) {
+    return source_yaw;
+  }
+  if (tf_) {
+    try {
+      const auto transform =
+        tf_->lookupTransform(planning_frame_, rog_frame_, tf2::TimePointZero);
+      const double yaw_in_planning =
+        source_yaw + utils::quaternionToYaw(transform.transform.rotation);
+      return std::atan2(std::sin(yaw_in_planning), std::cos(yaw_in_planning));
+    } catch (const tf2::TransformException &) {
+    }
+  }
+  return 0.0;
 }
 
 bool MincoPlanner::isTrajectoryTimeExpired(double now_s) const

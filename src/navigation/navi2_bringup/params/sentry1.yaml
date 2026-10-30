@@ -139,7 +139,7 @@ controller_server:
       goal_heading:
         enable: true  # true: MPC 使用底盘 IMU yaw 检查最终朝向；false: 恢复仅按 XY 位置停车。
         yaw_goal_tolerance: 0.15
-        stall_timeout_sec: 1.5
+        stall_timeout_sec: 5.0
 
       # Frame settings
       odom_frame: "camera_init"

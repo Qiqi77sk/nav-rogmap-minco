@@ -728,8 +728,12 @@ geometry_msgs::msg::TwistStamped MincoMpcController::computeVelocityCommands(
   }
 
   // 1) 构造当前状态（基于 pose + 最新里程计速度，用于延迟补偿）
+  // 实验：导航朝向改用 Point-LIO 雷达 yaw，与位置/速度参考同源；
+  // 无 odom 时再回退到 /sentry/offline_info.chassis_yaw_camerainit。
   double actual_heading_yaw = normalizeYaw(tf2::getYaw(pose.pose.orientation));
-  if (goal_heading_enable_) {
+  if (latest_odom) {
+    actual_heading_yaw = normalizeYaw(tf2::getYaw(latest_odom->pose.pose.orientation));
+  } else if (goal_heading_enable_) {
     std::lock_guard<std::mutex> lk(chassis_yaw_mtx_);
     const double age_s =
       latest_chassis_yaw_rx_ == std::chrono::steady_clock::time_point{}
